@@ -52,6 +52,7 @@ from posthog.hogql_queries.validation.validation import QueryValidationRule
 from posthog.models import Team
 from posthog.models.action.action import Action
 from posthog.models.filters.mixins.utils import cached_property
+from posthog.models.user import User
 from posthog.queries.util import correct_result_for_sampling
 
 DEFAULT_INTERVAL = IntervalType("day")
@@ -78,6 +79,7 @@ class RetentionQueryRunner(AnalyticsQueryRunner[RetentionQueryResponse]):
         timings: Optional[HogQLTimings] = None,
         modifiers: Optional[HogQLQueryModifiers] = None,
         limit_context: Optional[LimitContext] = None,
+        user: Optional[User] = None,
     ):
         super().__init__(
             query=query,
@@ -90,6 +92,7 @@ class RetentionQueryRunner(AnalyticsQueryRunner[RetentionQueryResponse]):
                 if not limit_context or limit_context in (LimitContext.QUERY_ASYNC, LimitContext.QUERY)
                 else limit_context
             ),
+            user=user,
         )
 
         self.start_event = self.query.retentionFilter.targetEntity or DEFAULT_ENTITY
@@ -576,6 +579,7 @@ class RetentionQueryRunner(AnalyticsQueryRunner[RetentionQueryResponse]):
             query_type="RetentionQuery",
             query=query,
             team=self.team,
+            user=self.user,
             timings=self.timings,
             modifiers=self.modifiers,
             limit_context=self.limit_context,

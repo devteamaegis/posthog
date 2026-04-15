@@ -71,7 +71,9 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
 
         return cast(
             InsightActorsQueryRunner,
-            get_query_runner(self.query.source, self.team, self.timings, self.limit_context, self.modifiers),
+            get_query_runner(
+                self.query.source, self.team, self.timings, self.limit_context, self.modifiers, user=self.user
+            ),
         )
 
     def validate(self) -> None:
@@ -628,6 +630,7 @@ class EventsQueryRunner(AnalyticsQueryRunner[EventsQueryResponse]):
         response = execute_hogql_query(
             query=session_check_query,
             team=self.team,
+            user=self.user,
             query_type="EventsQuerySessionRecordingsCheck",
             timings=self.timings,
             modifiers=self.modifiers,
