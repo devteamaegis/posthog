@@ -1816,11 +1816,7 @@ class QueryRunner(ABC, Generic[Q, R, CR]):
         """Returns a sorted list of restricted (property_name, type) pairs for the current user, or None if no restrictions."""
         from products.access_control.backend.property_access_control import get_restricted_properties_for_team
 
-        effective_user = self.user
-        if effective_user is None:
-            effective_user = current_query_user.get(None)
-
-        restricted = get_restricted_properties_for_team(team_id=self.team.pk, user=effective_user)
+        restricted = get_restricted_properties_for_team(team_id=self.team.pk, user=self.user)
         if not restricted:
             return None
         return sorted(restricted)
