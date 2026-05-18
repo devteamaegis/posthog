@@ -78,7 +78,8 @@ class InterviewStartCallTokenThrottle(SimpleRateThrottle):
     rate = "10/minute"
 
     def get_cache_key(self, request: Request, view: Any) -> str | None:
-        token = (getattr(request, "resolver_match", None) and request.resolver_match.kwargs.get("access_token")) or ""
+        resolver_match = getattr(request, "resolver_match", None)
+        token = resolver_match.kwargs.get("access_token") if resolver_match else None
         if not token:
             return None
         return self.cache_format % {"scope": self.scope, "ident": token}
