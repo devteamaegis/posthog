@@ -678,6 +678,23 @@ class TestVapiWebhook(APIBaseTest):
             response = self.client.post(url, data=body, content_type="application/json", HTTP_X_VAPI_SIGNATURE=sig)
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
+    def test_start_call_token_throttle_rejects_burst_on_same_token(self):
+        from django.core.cache import cache
+
+        from products.user_interviews.backend.webhooks import InterviewStartCallTokenThrottle
+
+        share = self._create_share()
+        self.client.logout()
+        cache.clear()
+        url = f"/api/user_interviews/share/{share.access_token}/start_call/"
+        with patch.object(InterviewStartCallTokenThrottle, "rate", "2/minute"):
+            # First two requests succeed (or fail for other reasons but not 429); third is throttled.
+            for _ in range(2):
+                response = self.client.post(url, content_type="application/json")
+                self.assertNotEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+            response = self.client.post(url, content_type="application/json")
+            self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
     @override_settings(VAPI_WEBHOOK_SECRET="topsecret")
     def test_webhook_ignores_unknown_message_types(self):
         self.client.logout()

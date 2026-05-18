@@ -28,6 +28,7 @@ from rest_framework.decorators import api_view, authentication_classes, permissi
 from rest_framework.permissions import AllowAny
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
 
 from posthog.schema import EmbeddingModelName
 
@@ -56,12 +57,40 @@ class InterviewStartCallIPThrottle(IPThrottle):
 
 class VapiWebhookIPThrottle(IPThrottle):
     """Per-IP cap on `vapi_webhook`. Vapi calls us a small handful of times per interview
-    (status-update + end-of-call-report), so 120/min is well above legitimate volume even
-    if Vapi shards across multiple egress IPs. Stops unauthenticated callers from filling
-    structured logs or burning CPU on HMAC verification."""
+    (status-update + end-of-call-report), but its egress is shared across all of our tenants,
+    so the bucket has to be generous enough that a noisy concurrent interview hour doesn't
+    bleed onto a normal one. 1200/min is well above legitimate aggregate volume while still
+    stopping a persistent attacker from driving HMAC-verification CPU or structured-log
+    volume from a single IP. Rejection emits `rate_limit_exceeded_total` via the IPThrottle
+    base class so we can alert if it ever trips."""
 
     scope = "user_interviews_vapi_webhook_ip"
-    rate = "120/minute"
+    rate = "1200/minute"
+
+
+class InterviewStartCallTokenThrottle(SimpleRateThrottle):
+    """Per-share-token cap on `start_call`. The access_token uniquely identifies one
+    interviewee invitation; a legitimate user clicks Start once. Anything above 10/min on
+    the same token is automation. Keying on the token (not IP) means an attacker rotating
+    IPs can't drive unbounded share-resolve DB lookups for a single guessed token."""
+
+    scope = "user_interviews_start_call_token"
+    rate = "10/minute"
+
+    def get_cache_key(self, request: Request, view: Any) -> str | None:
+        token = (getattr(request, "resolver_match", None) and request.resolver_match.kwargs.get("access_token")) or ""
+        if not token:
+            return None
+        return self.cache_format % {"scope": self.scope, "ident": token}
+
+    def allow_request(self, request: Request, view: Any) -> bool:
+        from posthog.rate_limit import RATE_LIMIT_EXCEEDED_COUNTER, get_route_from_path
+
+        allowed = super().allow_request(request, view)
+        if not allowed:
+            route = get_route_from_path(getattr(request, "path", None))
+            RATE_LIMIT_EXCEEDED_COUNTER.labels(team_id="", scope=self.scope, path=route, route=route).inc()
+        return bool(allowed)
 
 
 # Vapi's HMAC-SHA256 hex digest is exactly 64 lowercase hex chars; reject other shapes
@@ -224,7 +253,7 @@ def _build_first_message(
 @api_view(["POST"])
 @authentication_classes([])
 @permission_classes([AllowAny])
-@throttle_classes([InterviewStartCallIPThrottle])
+@throttle_classes([InterviewStartCallIPThrottle, InterviewStartCallTokenThrottle])
 def start_call(request: Request, access_token: str) -> Response:
     """Return the Vapi credentials + assistant overrides for a public interview share.
 
