@@ -66,7 +66,7 @@ class VapiWebhookIPThrottle(IPThrottle):
 
 # Vapi's HMAC-SHA256 hex digest is exactly 64 lowercase hex chars; reject other shapes
 # pre-HMAC so casual probes can't drive log/CPU load.
-_VAPI_SIGNATURE_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+_VAPI_SIGNATURE_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 _EMBEDDING_MODELS = [m.value for m in EmbeddingModelName]
