@@ -14,6 +14,7 @@ import {
     visionLensesCreate,
     visionLensesDestroy,
     visionLensesObservationsList,
+    visionLensesObserveCreate,
     visionLensesPartialUpdate,
     visionLensesRetrieve,
 } from '../generated/api'
@@ -89,6 +90,10 @@ export const replayLensLogic = kea<replayLensLogicType>([
         loadObservationsSuccess: (observations: ReplayObservation[]) => ({ observations }),
         loadObservationsFailure: true,
         deleteLens: true,
+        openRunDialog: true,
+        closeRunDialog: true,
+        setRunDialogSessionId: (sessionId: string) => ({ sessionId }),
+        submitRunDialog: true,
     }),
 
     forms(({ props }) => ({
@@ -167,6 +172,28 @@ export const replayLensLogic = kea<replayLensLogicType>([
                 loadObservationsFailure: () => false,
             },
         ],
+        runDialogOpen: [
+            false,
+            {
+                openRunDialog: () => true,
+                closeRunDialog: () => false,
+            },
+        ],
+        runDialogSessionId: [
+            '',
+            {
+                setRunDialogSessionId: (_, { sessionId }) => sessionId,
+                openRunDialog: () => '',
+                closeRunDialog: () => '',
+            },
+        ],
+        runDialogSubmitting: [
+            false,
+            {
+                submitRunDialog: () => true,
+                closeRunDialog: () => false,
+            },
+        ],
     }),
 
     selectors({
@@ -180,9 +207,14 @@ export const replayLensLogic = kea<replayLensLogicType>([
                 return !objectsEqual(lens, original)
             },
         ],
+        hasObservationsInFlight: [
+            (s) => [s.observations],
+            (observations: ReplayObservation[]): boolean =>
+                observations.some((o) => o.status === 'pending' || o.status === 'running'),
+        ],
     }),
 
-    listeners(({ actions, props }) => ({
+    listeners(({ actions, props, values, cache }) => ({
         loadLens: async () => {
             if (props.id === 'new') {
                 actions.loadLensSuccess(newLens())
@@ -241,6 +273,35 @@ export const replayLensLogic = kea<replayLensLogicType>([
                 actions.loadObservationsSuccess(observationsFromApi(response.results ?? []))
             } catch {
                 actions.loadObservationsFailure()
+            }
+        },
+
+        loadObservationsSuccess: () => {
+            if (values.hasObservationsInFlight) {
+                cache.disposables.add(() => {
+                    const id = setTimeout(() => actions.loadObservations(), 3000)
+                    return () => clearTimeout(id)
+                }, 'pollObservations')
+            } else {
+                cache.disposables.dispose('pollObservations')
+            }
+        },
+
+        submitRunDialog: async () => {
+            const teamId = teamLogic.values.currentTeamId
+            const sessionId = values.runDialogSessionId.trim()
+            if (!teamId || !sessionId || props.id === 'new') {
+                actions.closeRunDialog()
+                return
+            }
+            try {
+                await visionLensesObserveCreate(String(teamId), props.id, { session_id: sessionId })
+                lemonToast.success('Observation started')
+                actions.closeRunDialog()
+                actions.loadObservations()
+            } catch (error) {
+                lemonToast.error(`Failed to start observation: ${String(error)}`)
+                actions.closeRunDialog()
             }
         },
     })),

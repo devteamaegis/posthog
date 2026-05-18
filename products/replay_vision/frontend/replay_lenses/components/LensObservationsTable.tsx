@@ -1,19 +1,15 @@
 import { useActions, useValues } from 'kea'
 
 import { IconPlay, IconRefresh, IconWarning } from '@posthog/icons'
-import { LemonButton, LemonInput, LemonTable, LemonTag, Link, Spinner, Tooltip } from '@posthog/lemon-ui'
+import { LemonButton, LemonTable, LemonTag, Link, Spinner, Tooltip } from '@posthog/lemon-ui'
 
 import { TZLabel } from 'lib/components/TZLabel'
-import { LemonDialog } from 'lib/lemon-ui/LemonDialog'
-import { LemonField } from 'lib/lemon-ui/LemonField'
 import { LemonTableColumns } from 'lib/lemon-ui/LemonTable'
-import { lemonToast } from 'lib/lemon-ui/LemonToast'
-import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
 
-import { visionLensesObserveCreate } from '../../generated/api'
 import { replayLensLogic } from '../replayLensLogic'
 import { LensType, ObservationStatus, ReplayObservation } from '../types'
+import { LensRunOnSessionDialog } from './LensRunOnSessionDialog'
 
 function StatusTag({ status }: { status: ObservationStatus }): JSX.Element {
     if (status === 'succeeded') {
@@ -110,41 +106,88 @@ function ResultPreview({ lensType, observation }: { lensType: LensType; observat
     return <span className="text-muted text-sm">—</span>
 }
 
+function ObservationDetail({ observation }: { observation: ReplayObservation }): JSX.Element {
+    const snapshot = observation.lens_config_snapshot ?? {}
+    const promptSnapshot = typeof snapshot.prompt === 'string' ? snapshot.prompt : null
+    const { prompt: _omitPrompt, ...snapshotRest } = snapshot
+    const hasSnapshotRest = Object.keys(snapshotRest).length > 0
+    const durationMs =
+        observation.started_at && observation.completed_at
+            ? new Date(observation.completed_at).getTime() - new Date(observation.started_at).getTime()
+            : null
+
+    return (
+        <div className="p-4 bg-bg-light space-y-4">
+            <div className="flex flex-wrap gap-x-6 gap-y-2 text-xs text-muted">
+                <div>
+                    <div className="font-medium text-default">Model</div>
+                    <span className="font-mono">{observation.model_used || '—'}</span>
+                </div>
+                <div>
+                    <div className="font-medium text-default">Provider</div>
+                    <span className="font-mono">{observation.provider_used || '—'}</span>
+                </div>
+                <div>
+                    <div className="font-medium text-default">Lens version</div>v{observation.lens_version}
+                </div>
+                <div>
+                    <div className="font-medium text-default">Workflow ID</div>
+                    <span className="font-mono">{observation.workflow_id || '—'}</span>
+                </div>
+                {durationMs !== null && (
+                    <div>
+                        <div className="font-medium text-default">Run time</div>
+                        {(durationMs / 1000).toFixed(1)}s
+                    </div>
+                )}
+                <div>
+                    <Link to={urls.replaySingle(observation.session_id)}>Open recording →</Link>
+                </div>
+            </div>
+
+            {observation.status === 'failed' && observation.error_reason && (
+                <div>
+                    <div className="text-sm font-semibold mb-1 text-danger">Failure reason</div>
+                    <pre className="bg-bg-3000 border rounded p-2 text-xs whitespace-pre-wrap break-words m-0">
+                        {observation.error_reason}
+                    </pre>
+                </div>
+            )}
+
+            {observation.status === 'succeeded' && observation.result && (
+                <div>
+                    <div className="text-sm font-semibold mb-1">Result</div>
+                    <pre className="bg-bg-3000 border rounded p-2 text-xs whitespace-pre-wrap break-words m-0 max-h-96 overflow-y-auto">
+                        {JSON.stringify(observation.result, null, 2)}
+                    </pre>
+                </div>
+            )}
+
+            {promptSnapshot && (
+                <div>
+                    <div className="text-sm font-semibold mb-1">Prompt at run time</div>
+                    <pre className="bg-bg-3000 border rounded p-2 text-xs whitespace-pre-wrap break-words m-0">
+                        {promptSnapshot}
+                    </pre>
+                </div>
+            )}
+
+            {hasSnapshotRest && (
+                <div>
+                    <div className="text-sm font-semibold mb-1">Lens config at run time</div>
+                    <pre className="bg-bg-3000 border rounded p-2 text-xs whitespace-pre-wrap break-words m-0">
+                        {JSON.stringify(snapshotRest, null, 2)}
+                    </pre>
+                </div>
+            )}
+        </div>
+    )
+}
+
 export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId: string }): JSX.Element {
     const logic = replayLensLogic({ id: lensId, tabId })
-    const { lens, observations, observationsLoading, hasUnsavedChanges } = useValues(logic)
-    const { loadObservations } = useActions(logic)
-    const { currentTeamId } = useValues(teamLogic)
-
-    const openObserveDialog = (): void => {
-        LemonDialog.openForm({
-            title: 'Run lens on a session',
-            description:
-                'Apply this lens to a single recording on demand. The observation will appear here when the workflow finishes.',
-            initialValues: { session_id: '' },
-            content: (
-                <LemonField name="session_id" label="Session ID">
-                    <LemonInput placeholder="e.g. 01987f10-…" autoFocus />
-                </LemonField>
-            ),
-            errors: {
-                session_id: (v?: string) => (!v?.trim() ? 'Session ID is required' : undefined),
-            },
-            onSubmit: async (values) => {
-                if (!currentTeamId) {
-                    return
-                }
-                const sessionId = String(values.session_id ?? '').trim()
-                try {
-                    await visionLensesObserveCreate(String(currentTeamId), lensId, { session_id: sessionId })
-                    lemonToast.success('Observation started')
-                    loadObservations()
-                } catch (error) {
-                    lemonToast.error(`Failed to start observation: ${String(error)}`)
-                }
-            },
-        })
-    }
+    const { lens, observations, observationsLoading, hasUnsavedChanges, hasObservationsInFlight } = useValues(logic)
+    const { loadObservations, openRunDialog } = useActions(logic)
 
     if (!lens) {
         return <div className="text-muted">Loading…</div>
@@ -242,20 +285,28 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
                             )}
                         </div>
                     )}
-                    <LemonButton
-                        size="small"
-                        type="secondary"
-                        icon={<IconRefresh />}
-                        onClick={() => loadObservations()}
-                        loading={observationsLoading}
+                    <Tooltip
+                        title={
+                            hasObservationsInFlight
+                                ? 'Auto-refreshing while observations are in flight'
+                                : 'Refresh observations'
+                        }
                     >
-                        Refresh
-                    </LemonButton>
+                        <LemonButton
+                            size="small"
+                            type="secondary"
+                            icon={<IconRefresh />}
+                            onClick={() => loadObservations()}
+                            loading={observationsLoading || hasObservationsInFlight}
+                        >
+                            Refresh
+                        </LemonButton>
+                    </Tooltip>
                     <LemonButton
                         size="small"
                         type="primary"
                         icon={<IconPlay />}
-                        onClick={openObserveDialog}
+                        onClick={() => openRunDialog()}
                         disabledReason={hasUnsavedChanges ? 'Save your changes before running this lens' : undefined}
                     >
                         Run on a session
@@ -269,6 +320,10 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
                 rowKey="id"
                 pagination={{ pageSize: 50 }}
                 nouns={['observation', 'observations']}
+                expandable={{
+                    rowExpandable: (obs) => (obs.status === 'succeeded' || obs.status === 'failed' ? 1 : 0),
+                    expandedRowRender: (obs) => <ObservationDetail observation={obs} />,
+                }}
                 emptyState={
                     <div className="flex flex-col items-center gap-3 p-6 text-center">
                         <span className="text-muted">
@@ -277,7 +332,7 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
                         <LemonButton
                             type="primary"
                             icon={<IconPlay />}
-                            onClick={openObserveDialog}
+                            onClick={() => openRunDialog()}
                             disabledReason={
                                 hasUnsavedChanges ? 'Save your changes before running this lens' : undefined
                             }
@@ -287,6 +342,7 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
                     </div>
                 }
             />
+            <LensRunOnSessionDialog lensId={lensId} tabId={tabId} />
         </div>
     )
 }
