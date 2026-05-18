@@ -1,12 +1,17 @@
 import { useActions, useValues } from 'kea'
 
-import { IconRefresh, IconWarning } from '@posthog/icons'
-import { LemonButton, LemonTable, LemonTag, Link, Spinner, Tooltip } from '@posthog/lemon-ui'
+import { IconPlay, IconRefresh, IconWarning } from '@posthog/icons'
+import { LemonButton, LemonInput, LemonTable, LemonTag, Link, Spinner, Tooltip } from '@posthog/lemon-ui'
 
 import { TZLabel } from 'lib/components/TZLabel'
+import { LemonDialog } from 'lib/lemon-ui/LemonDialog'
+import { LemonField } from 'lib/lemon-ui/LemonField'
 import { LemonTableColumns } from 'lib/lemon-ui/LemonTable'
+import { lemonToast } from 'lib/lemon-ui/LemonToast'
+import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
 
+import { visionLensesObserveCreate } from '../../generated/api'
 import { replayLensLogic } from '../replayLensLogic'
 import { LensType, ObservationStatus, ReplayObservation } from '../types'
 
@@ -107,8 +112,39 @@ function ResultPreview({ lensType, observation }: { lensType: LensType; observat
 
 export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId: string }): JSX.Element {
     const logic = replayLensLogic({ id: lensId, tabId })
-    const { lens, observations, observationsLoading } = useValues(logic)
+    const { lens, observations, observationsLoading, hasUnsavedChanges } = useValues(logic)
     const { loadObservations } = useActions(logic)
+    const { currentTeamId } = useValues(teamLogic)
+
+    const openObserveDialog = (): void => {
+        LemonDialog.openForm({
+            title: 'Run lens on a session',
+            description:
+                'Apply this lens to a single recording on demand. The observation will appear here when the workflow finishes.',
+            initialValues: { session_id: '' },
+            content: (
+                <LemonField name="session_id" label="Session ID">
+                    <LemonInput placeholder="e.g. 01987f10-…" autoFocus />
+                </LemonField>
+            ),
+            errors: {
+                session_id: (v?: string) => (!v?.trim() ? 'Session ID is required' : undefined),
+            },
+            onSubmit: async (values) => {
+                if (!currentTeamId) {
+                    return
+                }
+                const sessionId = String(values.session_id ?? '').trim()
+                try {
+                    await visionLensesObserveCreate(String(currentTeamId), lensId, { session_id: sessionId })
+                    lemonToast.success('Observation started')
+                    loadObservations()
+                } catch (error) {
+                    lemonToast.error(`Failed to start observation: ${String(error)}`)
+                }
+            },
+        })
+    }
 
     if (!lens) {
         return <div className="text-muted">Loading…</div>
@@ -134,9 +170,10 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
         {
             title: 'Session',
             key: 'session',
+            width: 300,
             render: (_, obs) => (
-                <Link to={urls.replaySingle(obs.session_id)} className="font-mono text-xs text-primary">
-                    {obs.session_id.slice(0, 12)}…
+                <Link to={urls.replaySingle(obs.session_id)} className="font-mono text-xs text-primary truncate block">
+                    {obs.session_id}
                 </Link>
             ),
         },
@@ -214,6 +251,15 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
                     >
                         Refresh
                     </LemonButton>
+                    <LemonButton
+                        size="small"
+                        type="primary"
+                        icon={<IconPlay />}
+                        onClick={openObserveDialog}
+                        disabledReason={hasUnsavedChanges ? 'Save your changes before running this lens' : undefined}
+                    >
+                        Run on a session
+                    </LemonButton>
                 </div>
             </div>
             <LemonTable
@@ -224,9 +270,21 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
                 pagination={{ pageSize: 50 }}
                 nouns={['observation', 'observations']}
                 emptyState={
-                    <span className="text-muted">
-                        No observations yet. Once this lens runs against matching recordings, results will appear here.
-                    </span>
+                    <div className="flex flex-col items-center gap-3 p-6 text-center">
+                        <span className="text-muted">
+                            No observations yet. Try running this lens on a specific recording.
+                        </span>
+                        <LemonButton
+                            type="primary"
+                            icon={<IconPlay />}
+                            onClick={openObserveDialog}
+                            disabledReason={
+                                hasUnsavedChanges ? 'Save your changes before running this lens' : undefined
+                            }
+                        >
+                            Run on a session
+                        </LemonButton>
+                    </div>
                 }
             />
         </div>

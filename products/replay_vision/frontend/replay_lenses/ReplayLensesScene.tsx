@@ -129,8 +129,9 @@ export function ReplayLensesScene(): JSX.Element {
         {
             title: 'Config',
             key: 'config',
+            width: '40%',
             render: (_, lens) => (
-                <div className="max-w-md text-sm font-mono bg-bg-light border rounded px-2 py-1 truncate">
+                <div className="text-sm font-mono bg-bg-light border rounded px-2 py-1 truncate">
                     {lens.lens_config.prompt || '(empty)'}
                 </div>
             ),
