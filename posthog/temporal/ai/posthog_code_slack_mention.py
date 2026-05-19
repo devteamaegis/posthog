@@ -2,13 +2,16 @@ import re
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
+import structlog
 from slack_sdk.errors import SlackApiError
 from temporalio import activity, workflow
 from temporalio.common import RetryPolicy
 
 from posthog.temporal.common.base import PostHogWorkflow
+
+logger = structlog.get_logger(__name__)
 
 
 def _safe_react(client: Any, channel: str, timestamp: str, name: str) -> None:
@@ -35,6 +38,55 @@ POSTHOG_CODE_SLACK_RULES_ADD_PICKER_GUIDANCE = "Select the repository for this r
 
 _THREAD_CONTEXT_TAG = "slack_thread_context"
 _INITIATOR_PLACEHOLDER = "<original user message was here>"
+
+
+_QUOTA_EXHAUSTED_MESSAGE = (
+    "Your team has used its monthly PostHog AI credits. "
+    "Top up at https://us.posthog.com/organization/billing to continue."
+)
+
+
+def _block_if_team_over_quota(
+    *,
+    integration: Any,
+    slack: Any,
+    channel: str,
+    thread_ts: str,
+    slack_user_id: str,
+    context: Literal["task_create", "followup"],
+) -> bool:
+    """Reject a Slack-bot turn when the team is over its AI credits quota.
+
+    Mirrors PHAI's enforcement model (ee/api/conversation.py): every
+    user-initiated turn — new mention or follow-up reply — is gated against the
+    same Redis-backed `QuotaResource.AI_CREDITS` set. Returns True when the
+    team is blocked, posts a friendly in-thread denial as a side effect.
+    """
+    from products.slack_app.backend.api import _post_slack_user_feedback
+
+    from ee.billing.quota_limiting import QuotaLimitingCaches, QuotaResource, is_team_limited
+
+    if not is_team_limited(
+        integration.team.api_token, QuotaResource.AI_CREDITS, QuotaLimitingCaches.QUOTA_LIMITER_CACHE_KEY
+    ):
+        return False
+
+    logger.info(
+        "posthog_code_slack_blocked_by_quota",
+        context=context,
+        team_id=integration.team_id,
+        channel=channel,
+        thread_ts=thread_ts,
+    )
+    _post_slack_user_feedback(
+        slack,
+        channel,
+        slack_user_id,
+        thread_ts,
+        _QUOTA_EXHAUSTED_MESSAGE,
+        prefer_thread_message=True,
+    )
+    return True
 
 
 def _strip_context_tag(text: str) -> str:
@@ -792,6 +844,19 @@ def create_posthog_code_task_for_repo_activity(
         integration_id=inputs.slack_team_id,
     )
     slack = SlackIntegration(integration)
+
+    # Refuse before the :seedling: reaction or the permalink fetch: a denied
+    # mention should not first ack-react and then refuse a second later.
+    if _block_if_team_over_quota(
+        integration=integration,
+        slack=slack,
+        channel=channel,
+        thread_ts=thread_ts,
+        slack_user_id=slack_user_id,
+        context="task_create",
+    ):
+        return
+
     user_message_ts = event.get("ts")
     if user_message_ts:
         _safe_react(slack.client, channel, user_message_ts, "seedling")
@@ -1012,6 +1077,16 @@ def forward_posthog_code_followup_activity(
             thread_ts=thread_ts,
             text="Only the person who started this task can send follow-up messages to the agent.",
         )
+        return True
+
+    if _block_if_team_over_quota(
+        integration=integration,
+        slack=slack,
+        channel=channel,
+        thread_ts=thread_ts,
+        slack_user_id=slack_user_id,
+        context="followup",
+    ):
         return True
 
     if task_run.is_terminal:
