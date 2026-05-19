@@ -110,6 +110,20 @@ def _github_authorize_state_cache_key(user_id: int) -> str:
     return f"github_state:{user_id}"
 
 
+def _authenticated_user_id(request: Request) -> int:
+    if not request.user.is_authenticated:
+        raise ValidationError("Authentication required")
+    return cast(User, request.user).id
+
+
+def _get_request_full_data(request: Request) -> Any:
+    return getattr(request, "_full_data", None)
+
+
+def _set_request_full_data(request: Request, data: Any) -> None:
+    request._full_data = data
+
+
 def _set_github_project_id_cookie(response: HttpResponse, team_id: int) -> None:
     response.set_cookie("ph_github_project_id", str(team_id), max_age=GITHUB_AUTHORIZE_STATE_CACHE_TTL_SECONDS)
 
@@ -141,7 +155,7 @@ def _consume_github_authorize_state(request: Request, state_raw: str | None) -> 
     ``setup_action=update``). When that happens we still accept the callback if this user
     recently started ``integrations/authorize?kind=github`` and the session is authenticated.
     """
-    cache_key = _github_authorize_state_cache_key(request.user.id)
+    cache_key = _github_authorize_state_cache_key(_authenticated_user_id(request))
     cached = cache.get(cache_key)
     if cached is None:
         raise ValidationError("Invalid or expired state token")
@@ -170,7 +184,7 @@ def _github_finish_setup_update_response(
 ) -> Response:
     """User changed repo access on GitHub for an installation this team already has linked."""
     next_url = f"/project/{viewset.team_id}/settings/project-integrations"
-    cache_key = _github_authorize_state_cache_key(request.user.id)
+    cache_key = _github_authorize_state_cache_key(_authenticated_user_id(request))
     if cache.get(cache_key) is not None:
         _, next_url = _consume_github_authorize_state(request, state_raw)
 
@@ -824,7 +838,7 @@ class IntegrationViewSet(
             query_params = urlencode({"state": urlencode({"next": next, "token": token})})
             app_slug = get_instance_setting("GITHUB_APP_SLUG")
             installation_url = f"https://github.com/apps/{app_slug}/installations/new?{query_params}"
-            _store_github_authorize_state(request.user.id, token, next)
+            _store_github_authorize_state(_authenticated_user_id(request), token, next)
             response = redirect(installation_url)
             # nosemgrep: python.django.security.audit.secure-cookies.django-secure-set-cookie (OAuth state, short-lived, needed for cross-site redirect)
             _set_github_project_id_cookie(response, self.team_id)
@@ -1329,8 +1343,8 @@ class IntegrationViewSet(
         connect_from = _connect_from_for_next(next_url)
 
         if is_already_installed:
-            prior_data = getattr(request, "_full_data", None)
-            request._full_data = {"installation_id": str(installation_id)}
+            prior_data = _get_request_full_data(request)
+            _set_request_full_data(request, {"installation_id": str(installation_id)})
             try:
                 link_response = self.github_link_existing(request, *args, **kwargs)
             except ValidationError as exc:
@@ -1346,7 +1360,7 @@ class IntegrationViewSet(
                 }
                 if connect_from:
                     oauth_request_data["connect_from"] = connect_from
-                request._full_data = oauth_request_data
+                _set_request_full_data(request, oauth_request_data)
                 oauth_response = self.github_oauth_authorize(request, *args, **kwargs)
                 return Response(
                     {
@@ -1357,7 +1371,7 @@ class IntegrationViewSet(
                 )
             finally:
                 if prior_data is not None:
-                    request._full_data = prior_data
+                    _set_request_full_data(request, prior_data)
 
             integration_data = link_response.data
             return Response(
@@ -1368,21 +1382,24 @@ class IntegrationViewSet(
                 }
             )
 
-        _store_github_authorize_state(request.user.id, state_token, next_url)
-        prior_data = getattr(request, "_full_data", None)
-        request._full_data = {
-            "kind": "github",
-            "config": {
-                "installation_id": str(installation_id),
-                "state": state_token,
-                "code": code,
+        _store_github_authorize_state(_authenticated_user_id(request), state_token, next_url)
+        prior_data = _get_request_full_data(request)
+        _set_request_full_data(
+            request,
+            {
+                "kind": "github",
+                "config": {
+                    "installation_id": str(installation_id),
+                    "state": state_token,
+                    "code": code,
+                },
             },
-        }
+        )
         try:
             create_response = self.create(request, *args, **kwargs)
         finally:
             if prior_data is not None:
-                request._full_data = prior_data
+                _set_request_full_data(request, prior_data)
 
         return Response(
             {
@@ -1407,7 +1424,7 @@ class IntegrationViewSet(
             raise ValidationError("next must be a relative path starting with /")
 
         token = os.urandom(33).hex()
-        _store_github_authorize_state(request.user.id, token, next_url)
+        _store_github_authorize_state(_authenticated_user_id(request), token, next_url)
         response = Response(status=204)
         _set_github_project_id_cookie(response, self.team_id)
         return response
