@@ -41624,7 +41624,6 @@ export namespace Schemas {
     * `Experiment` - Experiment
     * `ExperimentHoldout` - ExperimentHoldout
     * `ExperimentSavedMetric` - ExperimentSavedMetric
-    * `ExperimentToSavedMetric` - ExperimentToSavedMetric
     * `Survey` - Survey
     * `EarlyAccessFeature` - EarlyAccessFeature
     * `SessionRecordingPlaylist` - SessionRecordingPlaylist
@@ -41700,7 +41699,6 @@ export namespace Schemas {
       Experiment: 'Experiment',
       ExperimentHoldout: 'ExperimentHoldout',
       ExperimentSavedMetric: 'ExperimentSavedMetric',
-      ExperimentToSavedMetric: 'ExperimentToSavedMetric',
       Survey: 'Survey',
       EarlyAccessFeature: 'EarlyAccessFeature',
       SessionRecordingPlaylist: 'SessionRecordingPlaylist',
@@ -41762,7 +41760,6 @@ export namespace Schemas {
     * `Experiment` - Experiment
     * `ExperimentHoldout` - ExperimentHoldout
     * `ExperimentSavedMetric` - ExperimentSavedMetric
-    * `ExperimentToSavedMetric` - ExperimentToSavedMetric
     * `Survey` - Survey
     * `EarlyAccessFeature` - EarlyAccessFeature
     * `SessionRecordingPlaylist` - SessionRecordingPlaylist
@@ -41826,7 +41823,6 @@ export namespace Schemas {
       Experiment: 'Experiment',
       ExperimentHoldout: 'ExperimentHoldout',
       ExperimentSavedMetric: 'ExperimentSavedMetric',
-      ExperimentToSavedMetric: 'ExperimentToSavedMetric',
       Survey: 'Survey',
       EarlyAccessFeature: 'EarlyAccessFeature',
       SessionRecordingPlaylist: 'SessionRecordingPlaylist',
