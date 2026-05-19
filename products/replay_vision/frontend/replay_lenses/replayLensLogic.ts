@@ -94,6 +94,7 @@ export const replayLensLogic = kea<replayLensLogicType>([
         closeRunDialog: true,
         setRunDialogSessionId: (sessionId: string) => ({ sessionId }),
         submitRunDialog: true,
+        submitRunDialogFailure: true,
     }),
 
     forms(({ props }) => ({
@@ -192,6 +193,7 @@ export const replayLensLogic = kea<replayLensLogicType>([
             {
                 submitRunDialog: () => true,
                 closeRunDialog: () => false,
+                submitRunDialogFailure: () => false,
             },
         ],
     }),
@@ -291,7 +293,7 @@ export const replayLensLogic = kea<replayLensLogicType>([
             const teamId = teamLogic.values.currentTeamId
             const sessionId = values.runDialogSessionId.trim()
             if (!teamId || !sessionId || props.id === 'new') {
-                actions.closeRunDialog()
+                actions.submitRunDialogFailure()
                 return
             }
             try {
@@ -301,7 +303,7 @@ export const replayLensLogic = kea<replayLensLogicType>([
                 actions.loadObservations()
             } catch (error) {
                 lemonToast.error(`Failed to start observation: ${String(error)}`)
-                actions.closeRunDialog()
+                actions.submitRunDialogFailure()
             }
         },
     })),

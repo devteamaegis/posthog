@@ -201,13 +201,14 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
             } else if (o.status === 'failed') {
                 acc.failed += 1
             } else {
-                acc.running += 1
+                acc.inFlight += 1
             }
             return acc
         },
-        { total: 0, succeeded: 0, failed: 0, running: 0 }
+        { total: 0, succeeded: 0, failed: 0, inFlight: 0 }
     )
-    const successRate = stats.total > 0 ? Math.round((stats.succeeded / stats.total) * 100) : null
+    const completed = stats.succeeded + stats.failed
+    const successRate = completed > 0 ? Math.round((stats.succeeded / completed) * 100) : null
 
     const columns: LemonTableColumns<ReplayObservation> = [
         {
@@ -277,9 +278,9 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
                                     <div className="text-muted">Failed</div>
                                 </div>
                             )}
-                            {stats.running > 0 && (
+                            {stats.inFlight > 0 && (
                                 <div className="text-center">
-                                    <div className="font-semibold text-lg">{stats.running}</div>
+                                    <div className="font-semibold text-lg">{stats.inFlight}</div>
                                     <div className="text-muted">In flight</div>
                                 </div>
                             )}
@@ -297,7 +298,7 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
                             type="secondary"
                             icon={<IconRefresh />}
                             onClick={() => loadObservations()}
-                            loading={observationsLoading || hasObservationsInFlight}
+                            loading={observationsLoading}
                         >
                             Refresh
                         </LemonButton>
@@ -321,7 +322,7 @@ export function LensObservationsTable({ lensId, tabId }: { lensId: string; tabId
                 pagination={{ pageSize: 50 }}
                 nouns={['observation', 'observations']}
                 expandable={{
-                    rowExpandable: (obs) => (obs.status === 'succeeded' || obs.status === 'failed' ? 1 : 0),
+                    rowExpandable: (obs) => obs.status === 'succeeded' || obs.status === 'failed',
                     expandedRowRender: (obs) => <ObservationDetail observation={obs} />,
                 }}
                 emptyState={
