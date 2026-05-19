@@ -1015,12 +1015,17 @@ class SharingViewerPageViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSe
                 raise NotFound("No heatmap found")
         elif isinstance(resource, SharingConfiguration) and resource.interviewee_context:
             from products.user_interviews.backend.api import _parse_identifier
+            from products.user_interviews.backend.models import UserInterview
 
             ic = resource.interviewee_context
             topic = ic.topic
             asset_title = topic.topic or "User interview"
             asset_description = "PostHog AI user interview"
             user_name, _ = _parse_identifier(ic.interviewee_identifier)
+            already_replied = UserInterview.objects.filter(
+                topic=topic,
+                interviewee_identifier=ic.interviewee_identifier,
+            ).exists()
             # Keep agent_context, questions, and Vapi credentials OUT of the public HTML —
             # the recipient would otherwise see their own internal-notes context in view-source.
             # The exporter scene fetches those server-side via /start_call/ when the user clicks Start.
@@ -1032,6 +1037,7 @@ class SharingViewerPageViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSe
                         "interviewee_identifier": ic.interviewee_identifier,
                         "user_name": user_name,
                         "topic": topic.topic,
+                        "already_replied": already_replied,
                     },
                 }
             )
