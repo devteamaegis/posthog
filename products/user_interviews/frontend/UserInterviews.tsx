@@ -69,7 +69,7 @@ function SearchResultCard({ result }: { result: UserInterviewSearchResultApi }):
     )
 }
 
-export function SearchResults({
+function SearchResults({
     results,
     loading,
 }: {
