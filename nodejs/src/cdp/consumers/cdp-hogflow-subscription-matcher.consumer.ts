@@ -97,7 +97,11 @@ export class CdpHogflowSubscriptionMatcherConsumer<
             }
             candidateTeamIds.push(teamId)
             for (const flow of flows) {
-                hogflows[flow.id] = flow
+                // Only flows with a wait step or event conversion goal are actionable;
+                // the matcher never wakes jobs parked in any other flow.
+                if (hasWaitUntilOrConversion(flow)) {
+                    hogflows[flow.id] = flow
+                }
             }
         }
 
@@ -105,7 +109,7 @@ export class CdpHogflowSubscriptionMatcherConsumer<
             return
         }
 
-        const candidates = await this.findParkedJobs(candidateTeamIds, distinctIds, personIds)
+        const candidates = await this.findParkedJobs(candidateTeamIds, distinctIds, personIds, Object.keys(hogflows))
         if (candidates.length === 0) {
             return
         }
@@ -220,7 +224,8 @@ export class CdpHogflowSubscriptionMatcherConsumer<
     private async findParkedJobs(
         teamIds: number[],
         distinctIds: string[],
-        personIds: string[]
+        personIds: string[],
+        functionIds: string[]
     ): Promise<ParkedCandidate[]> {
         if (!this.cyclotronPool) {
             return []
@@ -229,6 +234,8 @@ export class CdpHogflowSubscriptionMatcherConsumer<
         // Two index-friendly branches with UNION (dedupes rows that match both keys).
         // A single OR across distinct_id and person_id often forces Postgres into a
         // sequential scan; splitting lets each branch hit its own composite index.
+        // The function_id filter keeps the result to flows the matcher can act on,
+        // skipping jobs parked in non-wait flows on the same teams.
         const stopTimer = histogramHogflowMatcherFindParkedJobs.startTimer()
         let result
         try {
@@ -239,6 +246,7 @@ export class CdpHogflowSubscriptionMatcherConsumer<
                AND queue_name = 'hogflow'
                AND scheduled > NOW()
                AND team_id = ANY($1::int[])
+               AND function_id = ANY($4::uuid[])
                AND distinct_id = ANY($2::text[])
              UNION
              SELECT id, team_id, function_id, action_id, distinct_id, person_id
@@ -247,8 +255,9 @@ export class CdpHogflowSubscriptionMatcherConsumer<
                AND queue_name = 'hogflow'
                AND scheduled > NOW()
                AND team_id = ANY($1::int[])
+               AND function_id = ANY($4::uuid[])
                AND person_id = ANY($3::text[])`,
-                [teamIds, distinctIds, personIds]
+                [teamIds, distinctIds, personIds, functionIds]
             )
         } finally {
             stopTimer()
@@ -486,7 +495,14 @@ function applyWakeFlags(stateBuffer: Buffer, req: WakeRequest): Buffer | null {
     try {
         const parsed = parseJSON(stateBuffer.toString('utf-8'))
         const updatedState: HogFlowInvocationContext = { ...parsed.state }
-        if (req.stepMatched && updatedState.currentAction) {
+        if (req.stepMatched) {
+            if (!updatedState.currentAction) {
+                // A parked wait_until_condition job should always carry its current action.
+                // Without it we cannot tag the wake as an event match, and waking anyway
+                // would misclassify it as a timeout wake - skip instead.
+                logger.warn('Skipping wake: no currentAction in state', { jobId: req.id })
+                return null
+            }
             updatedState.currentAction = { ...updatedState.currentAction, eventMatched: true }
         }
         if (req.conversionMatched) {

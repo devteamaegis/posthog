@@ -33,8 +33,25 @@ type MockRow = {
 
 const eventBytecode = (eventName: string): any[] => ['_H', 1, 32, eventName, 32, 'event', 1, 1, 11]
 
-const makeHogFlow = (overrides: Partial<HogFlow> & { id: string }): HogFlow => {
-    const { id, team_id, ...rest } = overrides
+const makeHogFlow = (overrides: Partial<HogFlow> & { id: string; waitUntil?: boolean }): HogFlow => {
+    const { id, team_id, waitUntil = true, ...rest } = overrides
+    const waitAction = {
+        id: 'wait_node',
+        name: 'Wait',
+        type: 'wait_until_condition',
+        config: {
+            events: [
+                {
+                    filters: {
+                        bytecode: eventBytecode('wuc_subscribed'),
+                        events: [{ id: 'wuc_subscribed', name: 'wuc_subscribed', type: 'events', order: 0 }],
+                    },
+                },
+            ],
+            condition: { filters: null },
+            max_wait_duration: '5m',
+        },
+    }
     return {
         id,
         team_id: team_id ?? 1,
@@ -47,23 +64,7 @@ const makeHogFlow = (overrides: Partial<HogFlow> & { id: string }): HogFlow => {
                 type: 'trigger',
                 config: { type: 'event', filters: {} },
             },
-            {
-                id: 'wait_node',
-                name: 'Wait',
-                type: 'wait_until_condition',
-                config: {
-                    events: [
-                        {
-                            filters: {
-                                bytecode: eventBytecode('wuc_subscribed'),
-                                events: [{ id: 'wuc_subscribed', name: 'wuc_subscribed', type: 'events', order: 0 }],
-                            },
-                        },
-                    ],
-                    condition: { filters: null },
-                    max_wait_duration: '5m',
-                },
-            },
+            ...(waitUntil ? [waitAction] : []),
             { id: 'exit_node', name: 'Exit', type: 'exit', config: {} },
         ],
         edges: [],
@@ -179,6 +180,18 @@ describe('CdpHogflowSubscriptionMatcherConsumer', () => {
             expect(lookup.params[0]).toEqual([1])
             expect(lookup.params[1].sort()).toEqual(['user-1', 'user-2'])
             expect(lookup.params[2].sort()).toEqual(['person-uuid-1', 'person-uuid-2'])
+            expect(lookup.params[3]).toEqual(['flow-1'])
+        })
+
+        it('scopes the lookup to qualifying flows, excluding non-wait flows on the same team', async () => {
+            matcher.setHogFlows({
+                'flow-1': makeHogFlow({ id: 'flow-1' }),
+                'flow-2': makeHogFlow({ id: 'flow-2', waitUntil: false }),
+            })
+            await matcher.runWake([makeGlobals({})])
+            const lookup = matcher.calls.find((c) => c.sql.includes('SELECT id, team_id, function_id'))!
+            expect(lookup).not.toBeUndefined()
+            expect(lookup.params[3]).toEqual(['flow-1'])
         })
 
         it('skips cyclotron entirely when no team in the batch has a wait_until_condition or conversion goal', async () => {
@@ -239,6 +252,29 @@ describe('CdpHogflowSubscriptionMatcherConsumer', () => {
             const newState = parseJSON(update!.params[1][0].toString('utf-8')) as any
             expect(newState.state.currentAction.eventMatched).toBe(true)
             expect(newState.state.conversionMatched).toBeUndefined()
+        })
+
+        it('skips waking a matched job whose state has no currentAction', async () => {
+            matcher.findRows = [
+                {
+                    id: 'job-1',
+                    team_id: 1,
+                    function_id: 'flow-1',
+                    action_id: 'wait_node',
+                    distinct_id: 'user-1',
+                    person_id: null,
+                },
+            ]
+            // State is missing currentAction, so the matcher cannot tag the wake as an
+            // event match. It must skip the job rather than misclassify it as a timeout.
+            matcher.wakeRows = [{ ...matcher.findRows[0], state: stateBuffer({}) }]
+            matcher.updateRowCount = 1
+            matcher.setHogFlows({ 'flow-1': makeHogFlow({ id: 'flow-1' }) })
+
+            await matcher.runWake([makeGlobals({})])
+
+            const update = matcher.calls.find((c) => c.sql.startsWith('UPDATE cyclotron_jobs'))
+            expect(update).toBeUndefined()
         })
 
         it('wakes a job matched by person_id (batch-triggered scenario, distinct_id mismatch)', async () => {
