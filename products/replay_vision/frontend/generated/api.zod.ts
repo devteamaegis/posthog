@@ -147,3 +147,36 @@ export const VisionLensesObserveCreateBody = /* @__PURE__ */ zod
             .describe('ID of the session recording to apply the lens to.'),
     })
     .describe('Body of POST \/vision\/lenses\/{id}\/observe\/.')
+
+/**
+ * Estimate the observation volume a proposed lens would generate, for the pre-save cost preview.
+ */
+export const visionLensesEstimateCreateBodySamplingRateDefault = 1
+export const visionLensesEstimateCreateBodySamplingRateMin = 0
+export const visionLensesEstimateCreateBodySamplingRateMax = 1
+
+export const visionLensesEstimateCreateBodyWindowDaysDefault = 7
+export const visionLensesEstimateCreateBodyWindowDaysMax = 90
+
+export const VisionLensesEstimateCreateBody = /* @__PURE__ */ zod
+    .object({
+        query: zod
+            .unknown()
+            .optional()
+            .describe(
+                'Proposed `RecordingsQuery` for the candidate filter. `date_from`\/`date_to` are ignored — the lookback window is controlled by `window_days`. Omit to estimate against all recordings.'
+            ),
+        sampling_rate: zod
+            .number()
+            .min(visionLensesEstimateCreateBodySamplingRateMin)
+            .max(visionLensesEstimateCreateBodySamplingRateMax)
+            .default(visionLensesEstimateCreateBodySamplingRateDefault)
+            .describe('0..1 downsample applied to matched sessions. Defaults to 1.0 (no downsampling).'),
+        window_days: zod
+            .number()
+            .min(1)
+            .max(visionLensesEstimateCreateBodyWindowDaysMax)
+            .default(visionLensesEstimateCreateBodyWindowDaysDefault)
+            .describe('Lookback window, in days, for counting matching sessions. Defaults to 7.'),
+    })
+    .describe('Body of POST \/vision\/lenses\/estimate\/ — a proposed, unsaved lens config.')

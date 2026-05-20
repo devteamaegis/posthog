@@ -9,6 +9,8 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
  * OpenAPI spec version: 1.0.0
  */
 import type {
+    EstimateRequestApi,
+    EstimateResponseApi,
     ObserveRequestApi,
     ObserveResponseApi,
     PaginatedReplayLensListApi,
@@ -215,5 +217,25 @@ export const visionLensesObserveCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(observeRequestApi),
+    })
+}
+
+export const getVisionLensesEstimateCreateUrl = (projectId: string) => {
+    return `/api/environments/${projectId}/vision/lenses/estimate/`
+}
+
+/**
+ * Estimate the observation volume a proposed lens would generate, for the pre-save cost preview.
+ */
+export const visionLensesEstimateCreate = async (
+    projectId: string,
+    estimateRequestApi?: EstimateRequestApi,
+    options?: RequestInit
+): Promise<EstimateResponseApi> => {
+    return apiMutator<EstimateResponseApi>(getVisionLensesEstimateCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(estimateRequestApi),
     })
 }
