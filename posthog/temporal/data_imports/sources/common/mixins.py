@@ -11,7 +11,7 @@ from products.data_warehouse.backend.models.ssh_tunnel import SSHTunnel
 from products.data_warehouse.backend.models.util import _is_safe_public_ip
 
 
-def _is_host_safe(host: str, team_id: int) -> tuple[bool, str | None]:
+def _is_host_safe(host: str, team_id: int | None) -> tuple[bool, str | None]:
     """Validate that a host is not an internal/private IP address.
 
     Only enforced on cloud deployments — self-hosted instances are allowed
@@ -22,7 +22,8 @@ def _is_host_safe(host: str, team_id: int) -> tuple[bool, str | None]:
     reserved, and IPv6-mapped internal addresses.
 
     team whitelist: team_id 2 in US, team_id 1 in EU are allowed
-    to use internal IPs.
+    to use internal IPs. A team_id of None has no allowlist entry, so the
+    full check always applies.
     """
     if not is_cloud():
         return True, None

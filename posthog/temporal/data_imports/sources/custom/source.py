@@ -270,7 +270,10 @@ class CustomSource(SimpleSource[CustomSourceConfig]):
         if auth_type == "http_basic":
             basic_auth = (str(auth.get("username", "")), str(auth.get("password", "")))
 
-        session = make_tracked_session(headers=headers)
+        # The tracked session is always SSRF-guarded, so the probe itself
+        # can't be steered at an internal host — defence in depth alongside
+        # validate_manifest_urls. team_id carries the team's allowlist.
+        session = make_tracked_session(headers=headers, team_id=team_id)
 
         for resource in manifest["resources"]:
             endpoint = resource.get("endpoint", {})

@@ -21,6 +21,17 @@ def _make_response(json_body: Any, status_code: int = 200) -> Response:
 
 class TestRESTClient:
     @patch("posthog.temporal.data_imports.sources.common.rest_source.rest_client.make_tracked_session")
+    def test_passes_team_id_to_tracked_session(self, MockSession) -> None:
+        """team_id must reach make_tracked_session so the SSRF guard is mounted."""
+        RESTClient(base_url="https://api.example.com", team_id=42)
+        MockSession.assert_called_once_with(team_id=42)
+
+    @patch("posthog.temporal.data_imports.sources.common.rest_source.rest_client.make_tracked_session")
+    def test_defaults_team_id_to_none_when_unset(self, MockSession) -> None:
+        RESTClient(base_url="https://api.example.com")
+        MockSession.assert_called_once_with(team_id=None)
+
+    @patch("posthog.temporal.data_imports.sources.common.rest_source.rest_client.make_tracked_session")
     def test_paginate_single_page(self, MockSession) -> None:
         mock_session = MockSession.return_value
         mock_session.headers = {}

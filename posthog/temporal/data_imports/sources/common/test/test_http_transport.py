@@ -8,6 +8,8 @@ from urllib3.util.retry import Retry
 
 from posthog.temporal.data_imports.sources.common.http.transport import (
     DEFAULT_RETRY,
+    BlockedHostError,
+    SSRFGuardedHTTPAdapter,
     TrackedHTTPAdapter,
     make_tracked_adapter,
     make_tracked_session,
@@ -154,3 +156,75 @@ def test_send_does_not_mask_real_exception_when_record_raises():
     ):
         with pytest.raises(requests.exceptions.RequestException):
             session.get("http://127.0.0.1:1/", timeout=2)
+
+
+def test_make_tracked_session_is_always_ssrf_guarded():
+    """The factory always mounts the SSRF guard — there is no unguarded variant."""
+    session = make_tracked_session()
+
+    https_adapter = session.get_adapter("https://example.com/")
+    http_adapter = session.get_adapter("http://example.com/")
+
+    assert isinstance(https_adapter, SSRFGuardedHTTPAdapter)
+    assert isinstance(http_adapter, SSRFGuardedHTTPAdapter)
+
+
+@pytest.mark.parametrize("team_id", [None, 42])
+def test_make_tracked_session_carries_team_id_onto_the_guard(team_id):
+    """team_id reaches the guard as the allowlist team; None means no exemption."""
+    session = make_tracked_session(team_id=team_id)
+    adapter = session.get_adapter("https://example.com/")
+
+    assert isinstance(adapter, SSRFGuardedHTTPAdapter)
+    assert adapter._team_id == team_id
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://internal.example.com/data",
+        "http://169.254.169.254/latest/meta-data/",  # cloud metadata via a runtime pagination/redirect URL
+        "https://10.0.0.1/api",
+    ],
+)
+def test_ssrf_guard_blocks_unsafe_host(mock_record, url):
+    adapter = SSRFGuardedHTTPAdapter(team_id=42)
+    prepared = requests.Request("GET", url).prepare()
+
+    with patch(
+        "posthog.temporal.data_imports.sources.common.http.transport._is_host_safe",
+        return_value=(False, "Hosts with internal IP addresses are not allowed"),
+    ):
+        with pytest.raises(BlockedHostError, match="internal IP"):
+            adapter.send(prepared)
+
+    # A blocked request never reaches the network, so the observer never sees it.
+    mock_record.assert_not_called()
+
+
+def test_ssrf_guard_blocks_url_without_hostname(mock_record):
+    adapter = SSRFGuardedHTTPAdapter(team_id=42)
+    prepared = requests.Request("GET", "https://api.example.com/").prepare()
+    prepared.url = "/relative/path"  # a URL with no host must not slip past the guard
+
+    with pytest.raises(BlockedHostError, match="missing a hostname"):
+        adapter.send(prepared)
+
+    mock_record.assert_not_called()
+
+
+def test_ssrf_guard_allows_safe_host(mock_record, fake_http_send):
+    adapter = SSRFGuardedHTTPAdapter(team_id=42)
+    prepared = requests.Request("GET", "https://api.example.com/data").prepare()
+
+    with (
+        patch(
+            "posthog.temporal.data_imports.sources.common.http.transport._is_host_safe",
+            return_value=(True, None),
+        ),
+        fake_http_send(_fake_response(status_code=200, body=b"ok")),
+    ):
+        response = adapter.send(prepared)
+
+    assert response.status_code == 200
+    mock_record.assert_called_once()

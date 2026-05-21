@@ -56,6 +56,12 @@ class TestIsHostSafe(SimpleTestCase):
         valid, _ = _is_host_safe("10.0.0.1", team_id=1)
         assert valid
 
+    @override_settings(CLOUD_DEPLOYMENT="US")
+    def test_none_team_id_gets_no_allowlist_exemption(self):
+        valid, error = _is_host_safe("10.0.0.1", team_id=None)
+        assert not valid
+        assert error is not None
+
     @parameterized.expand(
         [
             ("localhost", "localhost"),

@@ -251,3 +251,14 @@ class TestCustomSourceValidateCredentials(SimpleTestCase):
         ok, err = source.validate_credentials(config, team_id=999)
         assert not ok
         assert err is not None
+
+    @patch("posthog.temporal.data_imports.sources.custom.source.make_tracked_session")
+    def test_probe_session_is_ssrf_guarded(self, mock_session):
+        # The probe must mount the SSRF guard so it can't be steered at an internal host.
+        mock_session.return_value.request.return_value = MagicMock(status_code=200, text="{}")
+
+        source = CustomSource()
+        config = CustomSourceConfig(manifest_json=json.dumps(_minimal_manifest()), auth_token="abc")
+        source.validate_credentials(config, team_id=999)
+
+        assert mock_session.call_args.kwargs["team_id"] == 999
