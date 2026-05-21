@@ -1,5 +1,3 @@
-import { useEffect, useState } from 'react'
-
 import { IconWarning } from '@posthog/icons'
 import { LemonTag, Spinner, Tooltip } from '@posthog/lemon-ui'
 
@@ -66,15 +64,15 @@ function ObservationResult({
     compact?: boolean
 }): JSX.Element {
     const reasoning = typeof result.reasoning === 'string' ? result.reasoning : null
+    const reasoningClass = compact ? 'text-muted text-xs truncate' : 'text-muted text-sm'
+    const bodyClass = compact ? 'text-sm truncate' : 'text-sm'
 
     if (lensType === 'monitor') {
         const verdict = Boolean(result.verdict)
         return (
             <div className="flex flex-col gap-1">
                 <LemonTag type={verdict ? 'success' : 'default'}>{verdict ? 'Yes' : 'No'}</LemonTag>
-                {reasoning && (
-                    <span className={compact ? 'text-muted text-xs truncate' : 'text-muted text-sm'}>{reasoning}</span>
-                )}
+                {reasoning && <span className={reasoningClass}>{reasoning}</span>}
             </div>
         )
     }
@@ -85,7 +83,7 @@ function ObservationResult({
         return (
             <div className="flex flex-col gap-1">
                 {title && <span className="font-semibold text-sm">{title}</span>}
-                {summary && <span className={compact ? 'text-muted text-xs line-clamp-2' : 'text-sm'}>{summary}</span>}
+                {summary && <span className={bodyClass}>{summary}</span>}
             </div>
         )
     }
@@ -105,7 +103,7 @@ function ObservationResult({
                         ))
                     )}
                 </div>
-                {!compact && reasoning && <span className="text-muted text-sm">{reasoning}</span>}
+                {reasoning && <span className={reasoningClass}>{reasoning}</span>}
             </div>
         )
     }
@@ -115,64 +113,39 @@ function ObservationResult({
         const label = typeof result.label === 'string' ? result.label : null
         return (
             <div className="flex flex-col gap-1">
-                <div className="flex items-baseline gap-2">
-                    <span className="font-semibold text-lg tabular-nums">{score ?? '—'}</span>
-                    {label && <span className="text-muted text-xs">{label}</span>}
-                </div>
-                {!compact && reasoning && <span className="text-muted text-sm">{reasoning}</span>}
+                <span className="text-sm">
+                    <span className="font-semibold">{score ?? '—'}</span>
+                    {label && <span className="text-muted"> {label}</span>}
+                </span>
+                {reasoning && <span className={reasoningClass}>{reasoning}</span>}
             </div>
         )
     }
 
     const summary = typeof result.summary === 'string' ? result.summary : null
     const keywords = Array.isArray(result.keywords) ? (result.keywords as string[]) : []
-    const visibleKeywords = compact ? keywords.slice(0, 5) : keywords
     return (
         <div className="flex flex-col gap-1">
-            {summary && <span className={compact ? 'text-sm truncate' : 'text-sm'}>{summary}</span>}
-            {visibleKeywords.length > 0 && (
+            {summary && <span className={bodyClass}>{summary}</span>}
+            {keywords.length > 0 && (
                 <div className="flex flex-wrap gap-1">
-                    {visibleKeywords.map((keyword) => (
+                    {keywords.map((keyword) => (
                         <LemonTag key={keyword} type="option" size="small">
                             {keyword}
                         </LemonTag>
                     ))}
-                    {compact && keywords.length > visibleKeywords.length && (
-                        <span className="text-muted text-xs">+{keywords.length - visibleKeywords.length}</span>
-                    )}
                 </div>
             )}
         </div>
     )
 }
 
-function formatElapsed(seconds: number): string {
-    if (seconds < 60) {
-        return `${seconds}s`
-    }
-    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
-}
-
-/**
- * In-progress state for a pending/running observation. Coarse on purpose: `ApplyLensWorkflow`
- * exposes no step-level progress yet, so this shows status and a live elapsed timer only.
- */
+/** In-progress state for a pending/running observation. */
 function ObservationProgress({ observation }: { observation: ReplayObservationApi }): JSX.Element {
-    // Re-render once a second so the elapsed timer ticks.
-    const [, tick] = useState(0)
-    useEffect(() => {
-        const id = setInterval(() => tick((value) => value + 1), 1000)
-        return () => clearInterval(id)
-    }, [])
-
-    const since = observation.started_at ?? observation.created_at
-    const elapsed = Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 1000))
-
     return (
         <div className="flex items-center gap-2 text-muted text-sm">
             <Spinner textColored />
             <span>{observation.status === 'pending' ? 'Queued…' : 'Analyzing recording…'}</span>
-            <span className="font-mono text-xs ml-auto">{formatElapsed(elapsed)}</span>
         </div>
     )
 }
