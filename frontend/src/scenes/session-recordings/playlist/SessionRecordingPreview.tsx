@@ -327,8 +327,6 @@ export const SessionRecordingPreview = memo(
 
         const { filters } = useValues(sessionRecordingsPlaylistLogic)
         const { recordingPropertiesById, recordingPropertiesLoading } = useValues(sessionRecordingsListPropertiesLogic)
-        const { featureFlags } = useValues(featureFlagLogic)
-        const summaryEnabled = !!featureFlags[FEATURE_FLAGS.REPLAY_VIDEO_BASED_SUMMARIZATION]
 
         const recordingProperties = recordingPropertiesById[recording.id]
         const loading = !recordingProperties && recordingPropertiesLoading
@@ -418,7 +416,7 @@ export const SessionRecordingPreview = memo(
 
                         <div className="flex items-center justify-between">
                             <FirstURL startUrl={recording.start_url} />
-                            {summaryEnabled && <RecordingSummaryIcon recording={recording} />}
+                            <RecordingSummaryIcon recording={recording} />
                         </div>
                     </div>
 

@@ -626,3 +626,65 @@ class TestObserveActionFeatureFlag(APIBaseTest):
                 format="json",
             )
             self.assertEqual(resp.status_code, 404)
+
+
+class TestSessionReplayObservationViewSet(_VisionAPITestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.lens_a = self._create_lens(name="lens-a")
+        self.lens_b = self._create_lens(name="lens-b")
+
+    @property
+    def session_observations_url(self) -> str:
+        return f"/api/environments/{self.team.id}/vision/observations/"
+
+    def _create_observation(self, lens: ReplayLens, session_id: str) -> ReplayObservation:
+        return ReplayObservation.objects.create(
+            lens=lens,
+            session_id=session_id,
+            lens_snapshot=_snapshot_for(lens),
+            triggered_by=ObservationTrigger.SCHEDULE,
+        )
+
+    def test_list_returns_observations_from_every_lens_for_the_session(self) -> None:
+        self._create_observation(self.lens_a, "sess-target")
+        self._create_observation(self.lens_b, "sess-target")
+        self._create_observation(self.lens_a, "sess-other")
+
+        resp = self.client.get(f"{self.session_observations_url}?session_id=sess-target")
+        self.assertEqual(resp.status_code, 200)
+        results = resp.json()["results"]
+        self.assertEqual({r["lens_id"] for r in results}, {str(self.lens_a.id), str(self.lens_b.id)})
+
+    def test_list_requires_session_id(self) -> None:
+        resp = self.client.get(self.session_observations_url)
+        self.assertEqual(resp.status_code, 400)
+
+    def test_list_excludes_other_teams(self) -> None:
+        other_org = Organization.objects.create(name="other")
+        other_team = Team.objects.create(organization=other_org, name="other-team")
+        other_lens = ReplayLens.objects.create(
+            team=other_team,
+            name="theirs",
+            lens_type=LensType.MONITOR,
+            lens_config={"prompt": "p"},
+            model=LensModel.GEMINI_3_FLASH,
+        )
+        ReplayObservation.objects.create(
+            lens=other_lens,
+            session_id="sess-target",
+            lens_snapshot=_snapshot_for(other_lens),
+            triggered_by=ObservationTrigger.SCHEDULE,
+        )
+        self._create_observation(self.lens_a, "sess-target")
+
+        resp = self.client.get(f"{self.session_observations_url}?session_id=sess-target")
+        self.assertEqual(resp.status_code, 200)
+        results = resp.json()["results"]
+        self.assertEqual([r["lens_id"] for r in results], [str(self.lens_a.id)])
+
+    def test_retrieve(self) -> None:
+        observation = self._create_observation(self.lens_a, "sess-target")
+        resp = self.client.get(f"{self.session_observations_url}{observation.id}/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["id"], str(observation.id))

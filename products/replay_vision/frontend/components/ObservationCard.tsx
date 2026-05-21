@@ -1,0 +1,220 @@
+import { useEffect, useState } from 'react'
+
+import { IconWarning } from '@posthog/icons'
+import { LemonTag, Spinner, Tooltip } from '@posthog/lemon-ui'
+
+import { TZLabel } from 'lib/components/TZLabel'
+
+import type { LensTypeEnumApi, ReplayObservationApi } from '../generated/api.schemas'
+
+const LENS_TYPE_LABEL: Record<LensTypeEnumApi, string> = {
+    monitor: 'Monitor',
+    classifier: 'Classifier',
+    scorer: 'Scorer',
+    summarizer: 'Summarizer',
+    indexer: 'Indexer',
+}
+
+export function ObservationStatusTag({ status }: { status: ReplayObservationApi['status'] }): JSX.Element {
+    if (status === 'succeeded') {
+        return <LemonTag type="success">Succeeded</LemonTag>
+    }
+    if (status === 'failed') {
+        return <LemonTag type="danger">Failed</LemonTag>
+    }
+    if (status === 'running') {
+        return (
+            <LemonTag type="warning">
+                <Spinner className="mr-1" /> Running
+            </LemonTag>
+        )
+    }
+    return <LemonTag type="default">Pending</LemonTag>
+}
+
+function readResult(observation: ReplayObservationApi): Record<string, unknown> | null {
+    const output = observation.lens_result?.model_output
+    return output && typeof output === 'object' ? (output as Record<string, unknown>) : null
+}
+
+/** Compact, single-cell preview of an observation result — used in the Vision scene's observations table. */
+export function ObservationResultSummary({ observation }: { observation: ReplayObservationApi }): JSX.Element {
+    if (observation.status === 'failed') {
+        return (
+            <Tooltip title={observation.error_reason || 'Unknown error'}>
+                <span className="inline-flex items-center gap-1 text-danger text-sm">
+                    <IconWarning /> {observation.error_reason || 'Failed'}
+                </span>
+            </Tooltip>
+        )
+    }
+    const lensType = observation.lens_snapshot?.lens_type
+    const result = readResult(observation)
+    if (!lensType || !result) {
+        return <span className="text-muted text-sm">—</span>
+    }
+    return <ObservationResult lensType={lensType} result={result} compact />
+}
+
+function ObservationResult({
+    lensType,
+    result,
+    compact = false,
+}: {
+    lensType: LensTypeEnumApi
+    result: Record<string, unknown>
+    compact?: boolean
+}): JSX.Element {
+    const reasoning = typeof result.reasoning === 'string' ? result.reasoning : null
+
+    if (lensType === 'monitor') {
+        const verdict = Boolean(result.verdict)
+        return (
+            <div className="flex flex-col gap-1">
+                <LemonTag type={verdict ? 'success' : 'default'}>{verdict ? 'Yes' : 'No'}</LemonTag>
+                {reasoning && (
+                    <span className={compact ? 'text-muted text-xs truncate' : 'text-muted text-sm'}>{reasoning}</span>
+                )}
+            </div>
+        )
+    }
+
+    if (lensType === 'summarizer') {
+        const title = typeof result.title === 'string' ? result.title : null
+        const summary = typeof result.summary === 'string' ? result.summary : null
+        return (
+            <div className="flex flex-col gap-1">
+                {title && <span className="font-semibold text-sm">{title}</span>}
+                {summary && <span className={compact ? 'text-muted text-xs line-clamp-2' : 'text-sm'}>{summary}</span>}
+            </div>
+        )
+    }
+
+    if (lensType === 'classifier') {
+        const tags = Array.isArray(result.tags) ? (result.tags as string[]) : []
+        return (
+            <div className="flex flex-col gap-1">
+                <div className="flex flex-wrap gap-1">
+                    {tags.length === 0 ? (
+                        <span className="text-muted text-sm">No tags</span>
+                    ) : (
+                        tags.map((tag) => (
+                            <LemonTag key={tag} type="option">
+                                {tag}
+                            </LemonTag>
+                        ))
+                    )}
+                </div>
+                {!compact && reasoning && <span className="text-muted text-sm">{reasoning}</span>}
+            </div>
+        )
+    }
+
+    if (lensType === 'scorer') {
+        const score = typeof result.score === 'number' ? result.score : null
+        const label = typeof result.label === 'string' ? result.label : null
+        return (
+            <div className="flex flex-col gap-1">
+                <div className="flex items-baseline gap-2">
+                    <span className="font-semibold text-lg tabular-nums">{score ?? '—'}</span>
+                    {label && <span className="text-muted text-xs">{label}</span>}
+                </div>
+                {!compact && reasoning && <span className="text-muted text-sm">{reasoning}</span>}
+            </div>
+        )
+    }
+
+    const summary = typeof result.summary === 'string' ? result.summary : null
+    const keywords = Array.isArray(result.keywords) ? (result.keywords as string[]) : []
+    const visibleKeywords = compact ? keywords.slice(0, 5) : keywords
+    return (
+        <div className="flex flex-col gap-1">
+            {summary && <span className={compact ? 'text-sm truncate' : 'text-sm'}>{summary}</span>}
+            {visibleKeywords.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                    {visibleKeywords.map((keyword) => (
+                        <LemonTag key={keyword} type="option" size="small">
+                            {keyword}
+                        </LemonTag>
+                    ))}
+                    {compact && keywords.length > visibleKeywords.length && (
+                        <span className="text-muted text-xs">+{keywords.length - visibleKeywords.length}</span>
+                    )}
+                </div>
+            )}
+        </div>
+    )
+}
+
+function formatElapsed(seconds: number): string {
+    if (seconds < 60) {
+        return `${seconds}s`
+    }
+    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+}
+
+/**
+ * In-progress state for a pending/running observation. Coarse on purpose — `ApplyLensWorkflow`
+ * exposes no step-level progress yet, so this shows status + a live elapsed timer only.
+ */
+function ObservationProgress({ observation }: { observation: ReplayObservationApi }): JSX.Element {
+    // Re-render once a second so the elapsed timer ticks.
+    const [, tick] = useState(0)
+    useEffect(() => {
+        const id = setInterval(() => tick((value) => value + 1), 1000)
+        return () => clearInterval(id)
+    }, [])
+
+    const since = observation.started_at ?? observation.created_at
+    const elapsed = Math.max(0, Math.round((Date.now() - new Date(since).getTime()) / 1000))
+
+    return (
+        <div className="flex items-center gap-2 text-muted text-sm">
+            <Spinner textColored />
+            <span>{observation.status === 'pending' ? 'Queued…' : 'Analyzing recording…'}</span>
+            <span className="font-mono text-xs ml-auto">{formatElapsed(elapsed)}</span>
+        </div>
+    )
+}
+
+/** Full observation presentation — used by the replay-page dock and the Vision scene's expanded rows. */
+export function ObservationCard({ observation }: { observation: ReplayObservationApi }): JSX.Element {
+    const snapshot = observation.lens_snapshot
+    const lensType = snapshot?.lens_type
+    const result = readResult(observation)
+    const signalsCount = observation.lens_result?.signals_count ?? 0
+
+    return (
+        <div className="border rounded p-3 bg-surface-primary space-y-2">
+            <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                    <ObservationStatusTag status={observation.status} />
+                    <span className="font-semibold text-sm truncate">{snapshot?.name || 'Lens'}</span>
+                    {lensType && <span className="text-muted text-xs">{LENS_TYPE_LABEL[lensType]}</span>}
+                </div>
+                <TZLabel time={observation.created_at} className="text-muted text-xs whitespace-nowrap" />
+            </div>
+
+            {observation.status === 'failed' && observation.error_reason && (
+                <div className="text-danger text-sm">{observation.error_reason}</div>
+            )}
+
+            {observation.status === 'succeeded' && lensType && result && (
+                <ObservationResult lensType={lensType} result={result} />
+            )}
+
+            {(observation.status === 'pending' || observation.status === 'running') && (
+                <ObservationProgress observation={observation} />
+            )}
+
+            <div className="flex items-center gap-3 text-muted text-xs">
+                {snapshot?.model && <span className="font-mono">{snapshot.model}</span>}
+                {signalsCount > 0 && (
+                    <span>
+                        {signalsCount} signal{signalsCount === 1 ? '' : 's'}
+                    </span>
+                )}
+            </div>
+        </div>
+    )
+}

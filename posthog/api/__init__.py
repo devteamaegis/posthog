@@ -111,7 +111,11 @@ from products.notebooks.backend.api.notebook import NotebookViewSet
 from products.notifications.backend.presentation.views import NotificationsViewSet
 from products.posthog_ai.backend.api import MCPToolsViewSet
 from products.product_tours.backend.api import ProductTourViewSet
-from products.replay_vision.backend.api import ReplayLensViewSet, ReplayObservationViewSet
+from products.replay_vision.backend.api import (
+    ReplayLensViewSet,
+    ReplayObservationViewSet,
+    SessionReplayObservationViewSet,
+)
 from products.signals.backend.views import SignalViewSet
 from products.tracing.backend.presentation.views import SpansViewSet as TracingSpansViewSet
 from products.user_interviews.backend.presentation.views import (
@@ -1598,6 +1602,12 @@ environment_vision_lenses_router.register(
     ReplayObservationViewSet,
     "environment_vision_lens_observations",
     ["team_id", "lens_id"],
+)
+environments_router.register(
+    r"vision/observations",
+    SessionReplayObservationViewSet,
+    "environment_vision_observations",
+    ["team_id"],
 )
 
 environments_router.register(

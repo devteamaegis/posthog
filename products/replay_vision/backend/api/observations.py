@@ -8,7 +8,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, extend_schema_field
 from pydantic import ValidationError as PydanticValidationError
 from rest_framework import mixins, serializers, viewsets
-from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.shared import UserBasicSerializer
@@ -206,3 +206,23 @@ class ReplayObservationViewSet(
             .select_related("triggered_by_user")
             .order_by("-created_at", "id")
         )
+
+
+@extend_schema(tags=[VISION_TAG])
+class SessionReplayObservationViewSet(ReplayObservationViewSet):
+    """Read-only access to a session's observations across every lens the team has, for the replay-page dock."""
+
+    def safely_get_queryset(self, queryset: QuerySet[ReplayObservation]) -> QuerySet[ReplayObservation]:
+        # Observations expose recording-derived output, so reading them requires session_recording read.
+        if not self.user_access_control.check_access_level_for_resource("session_recording", required_level="viewer"):
+            raise PermissionDenied("Reading replay observations requires session_recording read access.")
+        queryset = (
+            queryset.filter(team_id=self.team_id).select_related("triggered_by_user").order_by("-created_at", "id")
+        )
+        # A bare list would scan the whole team's observation history; the replay page always has a session.
+        if self.action == "list":
+            session_id = self.request.query_params.get("session_id")
+            if not session_id:
+                raise ValidationError("The `session_id` query parameter is required.")
+            queryset = queryset.filter(session_id=session_id)
+        return queryset

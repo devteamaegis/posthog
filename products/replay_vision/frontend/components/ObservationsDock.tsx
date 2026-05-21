@@ -1,0 +1,135 @@
+import { useActions, useValues } from 'kea'
+
+import { IconChevronDown, IconEye } from '@posthog/icons'
+import { LemonButton, LemonInput, Link, Spinner } from '@posthog/lemon-ui'
+
+import { LemonDropdown } from 'lib/lemon-ui/LemonDropdown/LemonDropdown'
+import { sessionRecordingPlayerLogic } from 'scenes/session-recordings/player/sessionRecordingPlayerLogic'
+import { urls } from 'scenes/urls'
+
+import type { ReplayLensApi } from '../generated/api.schemas'
+import { observationsDockLogic } from '../logics/observationsDockLogic'
+import { ObservationCard } from './ObservationCard'
+
+const COLLAPSED_HEIGHT = 44
+const EXPANDED_HEIGHT = 480
+
+export function ObservationsDock(): JSX.Element | null {
+    const { sessionRecordingId } = useValues(sessionRecordingPlayerLogic)
+
+    if (!sessionRecordingId) {
+        return null
+    }
+    return <ObservationsDockContent sessionId={sessionRecordingId} />
+}
+
+/** "Observe this recording" — searchable lens picker; a flat menu doesn't scale to teams with many lenses. */
+function LensPicker({ sessionId }: { sessionId: string }): JSX.Element {
+    const logic = observationsDockLogic({ sessionId })
+    const { lenses, filteredLenses, lensSearch, lensPickerOpen, observing } = useValues(logic)
+    const { observe, setLensSearch, setLensPickerOpen } = useActions(logic)
+
+    return (
+        <LemonDropdown
+            visible={lensPickerOpen}
+            onVisibilityChange={setLensPickerOpen}
+            closeOnClickInside={false}
+            placement="top-start"
+            overlay={
+                <div className="w-80">
+                    <div className="p-1 border-b">
+                        <LemonInput
+                            type="search"
+                            size="small"
+                            placeholder="Search lenses…"
+                            value={lensSearch}
+                            onChange={setLensSearch}
+                            autoFocus
+                        />
+                    </div>
+                    <div className="max-h-80 overflow-y-auto p-1">
+                        {lenses.length === 0 ? (
+                            <Link to={urls.replayVision()} className="block px-2 py-3 text-sm">
+                                No lenses yet — create one
+                            </Link>
+                        ) : filteredLenses.length === 0 ? (
+                            <div className="px-2 py-3 text-sm text-muted">No lenses match your search.</div>
+                        ) : (
+                            filteredLenses.map((lens: ReplayLensApi) => (
+                                <LemonButton key={lens.id} fullWidth size="small" onClick={() => observe(lens.id)}>
+                                    <span className="flex items-center justify-between gap-2 w-full">
+                                        <span className="truncate">{lens.name}</span>
+                                        <span className="text-muted text-xs shrink-0">{lens.lens_type}</span>
+                                    </span>
+                                </LemonButton>
+                            ))
+                        )}
+                    </div>
+                </div>
+            }
+        >
+            <LemonButton
+                size="small"
+                type="primary"
+                icon={<IconEye />}
+                sideIcon={<IconChevronDown />}
+                loading={observing}
+                data-attr="vision-observe-recording"
+            >
+                Observe this recording
+            </LemonButton>
+        </LemonDropdown>
+    )
+}
+
+function ObservationsDockContent({ sessionId }: { sessionId: string }): JSX.Element {
+    const logic = observationsDockLogic({ sessionId })
+    const { observations, observationsLoading, dockOpen } = useValues(logic)
+    const { setDockOpen } = useActions(logic)
+
+    const hasContent = observations.length > 0 || observationsLoading
+
+    return (
+        <div
+            className="relative border-t bg-surface-primary overflow-hidden flex flex-col transition-[max-height] duration-300 ease-out"
+            style={{ maxHeight: dockOpen ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT }}
+            data-attr="vision-observations-dock"
+        >
+            <div className="flex items-center gap-3 h-11 px-3 shrink-0">
+                <LensPicker sessionId={sessionId} />
+                {observations.length > 0 && (
+                    <span className="text-muted text-sm">
+                        {observations.length} observation{observations.length === 1 ? '' : 's'}
+                    </span>
+                )}
+                {hasContent && (
+                    <LemonButton
+                        className="ml-auto"
+                        size="small"
+                        icon={<IconChevronDown className={dockOpen ? 'rotate-180' : ''} />}
+                        onClick={() => setDockOpen(!dockOpen)}
+                        tooltip={dockOpen ? 'Collapse' : 'Expand'}
+                        aria-label={dockOpen ? 'Collapse observations' : 'Expand observations'}
+                    />
+                )}
+            </div>
+            {dockOpen && (
+                <div className="flex-1 overflow-y-auto px-3 pb-3 space-y-2">
+                    {observationsLoading && observations.length === 0 ? (
+                        <div className="flex items-center gap-2 text-muted py-4">
+                            <Spinner /> Loading observations…
+                        </div>
+                    ) : observations.length === 0 ? (
+                        <div className="text-muted text-sm py-4">
+                            No observations yet. Pick a lens to observe this recording.
+                        </div>
+                    ) : (
+                        observations.map((observation) => (
+                            <ObservationCard key={observation.id} observation={observation} />
+                        ))
+                    )}
+                </div>
+            )}
+        </div>
+    )
+}

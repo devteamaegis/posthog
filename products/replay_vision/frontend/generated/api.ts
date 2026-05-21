@@ -18,6 +18,7 @@ import type {
     ReplayObservationApi,
     VisionLensesListParams,
     VisionLensesObservationsListParams,
+    VisionObservationsListParams,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
@@ -215,5 +216,53 @@ export const visionLensesObserveCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(observeRequestApi),
+    })
+}
+
+export const getVisionObservationsListUrl = (projectId: string, params?: VisionObservationsListParams) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : value.toString())
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/environments/${projectId}/vision/observations/?${stringifiedParams}`
+        : `/api/environments/${projectId}/vision/observations/`
+}
+
+/**
+ * Read-only access to a session's observations across every lens the team has, for the replay-page dock.
+ */
+export const visionObservationsList = async (
+    projectId: string,
+    params?: VisionObservationsListParams,
+    options?: RequestInit
+): Promise<PaginatedReplayObservationListApi> => {
+    return apiMutator<PaginatedReplayObservationListApi>(getVisionObservationsListUrl(projectId, params), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getVisionObservationsRetrieveUrl = (projectId: string, id: string) => {
+    return `/api/environments/${projectId}/vision/observations/${id}/`
+}
+
+/**
+ * Read-only access to a session's observations across every lens the team has, for the replay-page dock.
+ */
+export const visionObservationsRetrieve = async (
+    projectId: string,
+    id: string,
+    options?: RequestInit
+): Promise<ReplayObservationApi> => {
+    return apiMutator<ReplayObservationApi>(getVisionObservationsRetrieveUrl(projectId, id), {
+        ...options,
+        method: 'GET',
     })
 }

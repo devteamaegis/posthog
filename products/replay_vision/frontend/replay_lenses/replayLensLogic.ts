@@ -14,10 +14,10 @@ import {
     visionLensesCreate,
     visionLensesDestroy,
     visionLensesObservationsList,
-    visionLensesObserveCreate,
     visionLensesPartialUpdate,
     visionLensesRetrieve,
 } from '../generated/api'
+import type { ReplayObservationApi } from '../generated/api.schemas'
 import type { replayLensLogicType } from './replayLensLogicType'
 import {
     DEFAULT_MODEL,
@@ -25,11 +25,9 @@ import {
     LensConfig,
     LensType,
     ReplayLens,
-    ReplayObservation,
     lensFromApi,
     lensToApiBody,
     lensToPatchedApiBody,
-    observationsFromApi,
 } from './types'
 
 export interface ReplayLensLogicProps {
@@ -87,14 +85,9 @@ export const replayLensLogic = kea<replayLensLogicType>([
         loadLensFailure: true,
         setLensType: (lensType: LensType) => ({ lensType }),
         loadObservations: true,
-        loadObservationsSuccess: (observations: ReplayObservation[]) => ({ observations }),
+        loadObservationsSuccess: (observations: ReplayObservationApi[]) => ({ observations }),
         loadObservationsFailure: true,
         deleteLens: true,
-        openRunDialog: true,
-        closeRunDialog: true,
-        setRunDialogSessionId: (sessionId: string) => ({ sessionId }),
-        submitRunDialog: true,
-        submitRunDialogFailure: true,
     }),
 
     forms(({ props }) => ({
@@ -160,7 +153,7 @@ export const replayLensLogic = kea<replayLensLogicType>([
             },
         ],
         observations: [
-            [] as ReplayObservation[],
+            [] as ReplayObservationApi[],
             {
                 loadObservationsSuccess: (_, { observations }) => observations,
             },
@@ -171,29 +164,6 @@ export const replayLensLogic = kea<replayLensLogicType>([
                 loadObservations: () => true,
                 loadObservationsSuccess: () => false,
                 loadObservationsFailure: () => false,
-            },
-        ],
-        runDialogOpen: [
-            false,
-            {
-                openRunDialog: () => true,
-                closeRunDialog: () => false,
-            },
-        ],
-        runDialogSessionId: [
-            '',
-            {
-                setRunDialogSessionId: (_, { sessionId }) => sessionId,
-                openRunDialog: () => '',
-                closeRunDialog: () => '',
-            },
-        ],
-        runDialogSubmitting: [
-            false,
-            {
-                submitRunDialog: () => true,
-                closeRunDialog: () => false,
-                submitRunDialogFailure: () => false,
             },
         ],
     }),
@@ -211,7 +181,7 @@ export const replayLensLogic = kea<replayLensLogicType>([
         ],
         hasObservationsInFlight: [
             (s) => [s.observations],
-            (observations: ReplayObservation[]): boolean =>
+            (observations: ReplayObservationApi[]): boolean =>
                 observations.some((o) => o.status === 'pending' || o.status === 'running'),
         ],
     }),
@@ -272,7 +242,7 @@ export const replayLensLogic = kea<replayLensLogicType>([
             }
             try {
                 const response = await visionLensesObservationsList(String(teamId), props.id)
-                actions.loadObservationsSuccess(observationsFromApi(response.results ?? []))
+                actions.loadObservationsSuccess(response.results ?? [])
             } catch {
                 actions.loadObservationsFailure()
             }
@@ -286,24 +256,6 @@ export const replayLensLogic = kea<replayLensLogicType>([
                 }, 'pollObservations')
             } else {
                 cache.disposables.dispose('pollObservations')
-            }
-        },
-
-        submitRunDialog: async () => {
-            const teamId = teamLogic.values.currentTeamId
-            const sessionId = values.runDialogSessionId.trim()
-            if (!teamId || !sessionId || props.id === 'new') {
-                actions.submitRunDialogFailure()
-                return
-            }
-            try {
-                await visionLensesObserveCreate(String(teamId), props.id, { session_id: sessionId })
-                lemonToast.success('Observation started')
-                actions.closeRunDialog()
-                actions.loadObservations()
-            } catch (error) {
-                lemonToast.error(`Failed to start observation: ${String(error)}`)
-                actions.submitRunDialogFailure()
             }
         },
     })),

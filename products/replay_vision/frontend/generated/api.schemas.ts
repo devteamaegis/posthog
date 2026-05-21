@@ -454,3 +454,65 @@ export const VisionLensesObservationsListTriggeredBy = {
     OnDemand: 'on_demand',
     Schedule: 'schedule',
 } as const
+
+export type VisionObservationsListParams = {
+    /**
+     * Number of results to return per page.
+     */
+    limit?: number
+    /**
+     * The initial index from which to return the results.
+     */
+    offset?: number
+    /**
+ * Sort observations by created_at, started_at, completed_at, or status. Prefix with `-` for descending.
+
+* `created_at` - Created at
+* `-created_at` - Created at (descending)
+* `started_at` - Started at
+* `-started_at` - Started at (descending)
+* `completed_at` - Completed at
+* `-completed_at` - Completed at (descending)
+* `status` - Status
+* `-status` - Status (descending)
+ */
+    order_by?: string[]
+    /**
+     * Filter to observations of a specific session recording.
+     */
+    session_id?: string
+    /**
+ * Filter by observation status.
+
+* `pending` - Pending
+* `running` - Running
+* `succeeded` - Succeeded
+* `failed` - Failed
+ */
+    status?: VisionObservationsListStatus
+    /**
+ * Filter by trigger source (schedule or on_demand).
+
+* `schedule` - Schedule
+* `on_demand` - On demand
+ */
+    triggered_by?: VisionObservationsListTriggeredBy
+}
+
+export type VisionObservationsListStatus =
+    (typeof VisionObservationsListStatus)[keyof typeof VisionObservationsListStatus]
+
+export const VisionObservationsListStatus = {
+    Failed: 'failed',
+    Pending: 'pending',
+    Running: 'running',
+    Succeeded: 'succeeded',
+} as const
+
+export type VisionObservationsListTriggeredBy =
+    (typeof VisionObservationsListTriggeredBy)[keyof typeof VisionObservationsListTriggeredBy]
+
+export const VisionObservationsListTriggeredBy = {
+    OnDemand: 'on_demand',
+    Schedule: 'schedule',
+} as const
