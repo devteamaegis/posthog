@@ -37,7 +37,7 @@ function readResult(observation: ReplayObservationApi): Record<string, unknown> 
     return output && typeof output === 'object' ? (output as Record<string, unknown>) : null
 }
 
-/** Compact, single-cell preview of an observation result — used in the Vision scene's observations table. */
+/** Compact, single-cell preview of an observation result for the Vision scene's observations table. */
 export function ObservationResultSummary({ observation }: { observation: ReplayObservationApi }): JSX.Element {
     if (observation.status === 'failed') {
         return (
@@ -154,8 +154,8 @@ function formatElapsed(seconds: number): string {
 }
 
 /**
- * In-progress state for a pending/running observation. Coarse on purpose — `ApplyLensWorkflow`
- * exposes no step-level progress yet, so this shows status + a live elapsed timer only.
+ * In-progress state for a pending/running observation. Coarse on purpose: `ApplyLensWorkflow`
+ * exposes no step-level progress yet, so this shows status and a live elapsed timer only.
  */
 function ObservationProgress({ observation }: { observation: ReplayObservationApi }): JSX.Element {
     // Re-render once a second so the elapsed timer ticks.
@@ -177,7 +177,7 @@ function ObservationProgress({ observation }: { observation: ReplayObservationAp
     )
 }
 
-/** Full observation presentation — used by the replay-page dock and the Vision scene's expanded rows. */
+/** Full observation presentation for the replay-page dock and the Vision scene's expanded rows. */
 export function ObservationCard({ observation }: { observation: ReplayObservationApi }): JSX.Element {
     const snapshot = observation.lens_snapshot
     const lensType = snapshot?.lens_type

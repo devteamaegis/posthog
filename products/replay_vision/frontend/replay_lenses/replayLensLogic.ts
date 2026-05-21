@@ -18,6 +18,7 @@ import {
     visionLensesRetrieve,
 } from '../generated/api'
 import type { ReplayObservationApi } from '../generated/api.schemas'
+import { scheduleObservationPoll } from '../logics/observationPolling'
 import type { replayLensLogicType } from './replayLensLogicType'
 import {
     DEFAULT_MODEL,
@@ -249,14 +250,7 @@ export const replayLensLogic = kea<replayLensLogicType>([
         },
 
         loadObservationsSuccess: () => {
-            if (values.hasObservationsInFlight) {
-                cache.disposables.add(() => {
-                    const id = setTimeout(() => actions.loadObservations(), 3000)
-                    return () => clearTimeout(id)
-                }, 'pollObservations')
-            } else {
-                cache.disposables.dispose('pollObservations')
-            }
+            scheduleObservationPoll(cache, values.hasObservationsInFlight, actions.loadObservations)
         },
     })),
 

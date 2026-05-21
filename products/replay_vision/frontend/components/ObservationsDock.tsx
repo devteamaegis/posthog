@@ -1,8 +1,12 @@
+import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
+import { useRef } from 'react'
 
 import { IconChevronDown, IconEye } from '@posthog/icons'
 import { LemonButton, LemonInput, Link, Spinner } from '@posthog/lemon-ui'
 
+import { Resizer } from 'lib/components/Resizer/Resizer'
+import { ResizerLogicProps, resizerLogic } from 'lib/components/Resizer/resizerLogic'
 import { LemonDropdown } from 'lib/lemon-ui/LemonDropdown/LemonDropdown'
 import { sessionRecordingPlayerLogic } from 'scenes/session-recordings/player/sessionRecordingPlayerLogic'
 import { urls } from 'scenes/urls'
@@ -12,7 +16,9 @@ import { observationsDockLogic } from '../logics/observationsDockLogic'
 import { ObservationCard } from './ObservationCard'
 
 const COLLAPSED_HEIGHT = 44
-const EXPANDED_HEIGHT = 480
+const DEFAULT_EXPANDED_HEIGHT = 480
+const MIN_EXPANDED_HEIGHT = 120
+const MAX_EXPANDED_HEIGHT = 800
 
 export function ObservationsDock(): JSX.Element | null {
     const { sessionRecordingId } = useValues(sessionRecordingPlayerLogic)
@@ -23,7 +29,7 @@ export function ObservationsDock(): JSX.Element | null {
     return <ObservationsDockContent sessionId={sessionRecordingId} />
 }
 
-/** "Observe this recording" — searchable lens picker; a flat menu doesn't scale to teams with many lenses. */
+/** Searchable lens picker for "Observe this recording"; a flat menu doesn't scale to teams with many lenses. */
 function LensPicker({ sessionId }: { sessionId: string }): JSX.Element {
     const logic = observationsDockLogic({ sessionId })
     const { lenses, filteredLenses, lensSearch, lensPickerOpen, observing } = useValues(logic)
@@ -87,14 +93,31 @@ function ObservationsDockContent({ sessionId }: { sessionId: string }): JSX.Elem
     const { observations, observationsLoading, dockOpen } = useValues(logic)
     const { setDockOpen } = useActions(logic)
 
+    const dockRef = useRef<HTMLDivElement>(null)
+    const resizerProps: ResizerLogicProps = {
+        logicKey: 'vision-observations-dock',
+        placement: 'top',
+        containerRef: dockRef,
+    }
+    const { desiredSize, isResizeInProgress } = useValues(resizerLogic(resizerProps))
+
     const hasContent = observations.length > 0 || observationsLoading
+    const expandedHeight = Math.max(
+        MIN_EXPANDED_HEIGHT,
+        Math.min(MAX_EXPANDED_HEIGHT, desiredSize ?? DEFAULT_EXPANDED_HEIGHT)
+    )
 
     return (
         <div
-            className="relative border-t bg-surface-primary overflow-hidden flex flex-col transition-[max-height] duration-300 ease-out"
-            style={{ maxHeight: dockOpen ? EXPANDED_HEIGHT : COLLAPSED_HEIGHT }}
+            ref={dockRef}
+            className={clsx(
+                'relative border-t bg-surface-primary overflow-hidden flex flex-col',
+                !isResizeInProgress && 'transition-[max-height] duration-300 ease-out'
+            )}
+            style={{ maxHeight: dockOpen ? expandedHeight : COLLAPSED_HEIGHT }}
             data-attr="vision-observations-dock"
         >
+            {dockOpen && <Resizer {...resizerProps} />}
             <div className="flex items-center gap-3 h-11 px-3 shrink-0">
                 <LensPicker sessionId={sessionId} />
                 {observations.length > 0 && (

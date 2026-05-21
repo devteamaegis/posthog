@@ -5,7 +5,7 @@ from django.db.models import QuerySet
 import structlog
 import django_filters
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema, extend_schema_field
+from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_field, extend_schema_view
 from pydantic import ValidationError as PydanticValidationError
 from rest_framework import mixins, serializers, viewsets
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
@@ -209,15 +209,41 @@ class ReplayObservationViewSet(
 
 
 @extend_schema(tags=[VISION_TAG])
+@extend_schema_view(
+    list=extend_schema(
+        parameters=[
+            OpenApiParameter(
+                "session_id",
+                str,
+                OpenApiParameter.QUERY,
+                required=True,
+                description="Session recording id to return observations for.",
+            )
+        ]
+    )
+)
 class SessionReplayObservationViewSet(ReplayObservationViewSet):
-    """Read-only access to a session's observations across every lens the team has, for the replay-page dock."""
+    """Read-only access to a session's observations across every lens the caller can read, for the replay-page dock."""
+
+    # The dock fetches one session's observations; `session_id` is required and enforced in
+    # safely_get_queryset, so this viewset needs none of the base's optional list filters.
+    filter_backends: list = []
 
     def safely_get_queryset(self, queryset: QuerySet[ReplayObservation]) -> QuerySet[ReplayObservation]:
         # Observations expose recording-derived output, so reading them requires session_recording read.
         if not self.user_access_control.check_access_level_for_resource("session_recording", required_level="viewer"):
             raise PermissionDenied("Reading replay observations requires session_recording read access.")
+        # Observations inherit their lens's RBAC. The generic access filter keys on the ReplayObservation
+        # row rather than its lens, so scope explicitly to the lenses this caller can read.
+        readable_lens_ids = list(
+            self.user_access_control.filter_queryset_by_access_level(
+                ReplayLens.objects.filter(team_id=self.team_id)
+            ).values_list("id", flat=True)
+        )
         queryset = (
-            queryset.filter(team_id=self.team_id).select_related("triggered_by_user").order_by("-created_at", "id")
+            queryset.filter(team_id=self.team_id, lens_id__in=readable_lens_ids)
+            .select_related("triggered_by_user")
+            .order_by("-created_at", "id")
         )
         # A bare list would scan the whole team's observation history; the replay page always has a session.
         if self.action == "list":

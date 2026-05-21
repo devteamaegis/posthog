@@ -219,7 +219,7 @@ export const visionLensesObserveCreate = async (
     })
 }
 
-export const getVisionObservationsListUrl = (projectId: string, params?: VisionObservationsListParams) => {
+export const getVisionObservationsListUrl = (projectId: string, params: VisionObservationsListParams) => {
     const normalizedParams = new URLSearchParams()
 
     Object.entries(params || {}).forEach(([key, value]) => {
@@ -236,11 +236,11 @@ export const getVisionObservationsListUrl = (projectId: string, params?: VisionO
 }
 
 /**
- * Read-only access to a session's observations across every lens the team has, for the replay-page dock.
+ * Read-only access to a session's observations across every lens the caller can read, for the replay-page dock.
  */
 export const visionObservationsList = async (
     projectId: string,
-    params?: VisionObservationsListParams,
+    params: VisionObservationsListParams,
     options?: RequestInit
 ): Promise<PaginatedReplayObservationListApi> => {
     return apiMutator<PaginatedReplayObservationListApi>(getVisionObservationsListUrl(projectId, params), {
@@ -254,7 +254,7 @@ export const getVisionObservationsRetrieveUrl = (projectId: string, id: string) 
 }
 
 /**
- * Read-only access to a session's observations across every lens the team has, for the replay-page dock.
+ * Read-only access to a session's observations across every lens the caller can read, for the replay-page dock.
  */
 export const visionObservationsRetrieve = async (
     projectId: string,

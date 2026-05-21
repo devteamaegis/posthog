@@ -1,13 +1,17 @@
 import { actions, afterMount, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { loaders } from 'kea-loaders'
 
 import { lemonToast } from 'lib/lemon-ui/LemonToast'
 import { teamLogic } from 'scenes/teamLogic'
 
 import { visionLensesList, visionLensesObserveCreate, visionObservationsList } from '../generated/api'
 import type { ReplayLensApi, ReplayObservationApi } from '../generated/api.schemas'
+import { scheduleObservationPoll } from './observationPolling'
 import type { observationsDockLogicType } from './observationsDockLogicType'
 
-const POLL_INTERVAL_MS = 3000
+// The observe endpoint only starts the workflow; its row is created a moment later. Keep polling
+// for this window after an observe so the new card appears even before anything reports in flight.
+const OBSERVE_POLL_GRACE_MS = 30000
 
 export interface ObservationsDockLogicProps {
     sessionId: string
@@ -19,12 +23,6 @@ export const observationsDockLogic = kea<observationsDockLogicType>([
     key((props) => props.sessionId),
 
     actions({
-        loadObservations: true,
-        loadObservationsSuccess: (observations: ReplayObservationApi[]) => ({ observations }),
-        loadObservationsFailure: true,
-        loadLenses: true,
-        loadLensesSuccess: (lenses: ReplayLensApi[]) => ({ lenses }),
-        loadLensesFailure: true,
         observe: (lensId: string) => ({ lensId }),
         observeSuccess: true,
         observeFailure: true,
@@ -33,27 +31,36 @@ export const observationsDockLogic = kea<observationsDockLogicType>([
         setLensSearch: (search: string) => ({ search }),
     }),
 
-    reducers({
+    loaders(({ props }) => ({
         observations: [
             [] as ReplayObservationApi[],
             {
-                loadObservationsSuccess: (_, { observations }) => observations,
-            },
-        ],
-        observationsLoading: [
-            false,
-            {
-                loadObservations: () => true,
-                loadObservationsSuccess: () => false,
-                loadObservationsFailure: () => false,
+                loadObservations: async () => {
+                    const teamId = teamLogic.values.currentTeamId
+                    if (!teamId) {
+                        return []
+                    }
+                    const response = await visionObservationsList(String(teamId), { session_id: props.sessionId })
+                    return response.results ?? []
+                },
             },
         ],
         lenses: [
             [] as ReplayLensApi[],
             {
-                loadLensesSuccess: (_, { lenses }) => lenses,
+                loadLenses: async () => {
+                    const teamId = teamLogic.values.currentTeamId
+                    if (!teamId) {
+                        return []
+                    }
+                    const response = await visionLensesList(String(teamId))
+                    return response.results ?? []
+                },
             },
         ],
+    })),
+
+    reducers({
         observing: [
             false,
             {
@@ -82,6 +89,12 @@ export const observationsDockLogic = kea<observationsDockLogicType>([
                 setLensPickerOpen: () => '',
             },
         ],
+        pollUntil: [
+            0,
+            {
+                observeSuccess: () => Date.now() + OBSERVE_POLL_GRACE_MS,
+            },
+        ],
     }),
 
     selectors({
@@ -100,41 +113,13 @@ export const observationsDockLogic = kea<observationsDockLogicType>([
     }),
 
     listeners(({ actions, props, values, cache }) => ({
-        loadObservations: async () => {
-            const teamId = teamLogic.values.currentTeamId
-            if (!teamId) {
-                return
-            }
-            try {
-                const response = await visionObservationsList(String(teamId), { session_id: props.sessionId })
-                actions.loadObservationsSuccess(response.results ?? [])
-            } catch {
-                actions.loadObservationsFailure()
-            }
-        },
-
         loadObservationsSuccess: () => {
-            if (values.hasObservationsInFlight) {
-                cache.disposables.add(() => {
-                    const id = setTimeout(() => actions.loadObservations(), POLL_INTERVAL_MS)
-                    return () => clearTimeout(id)
-                }, 'pollObservations')
-            } else {
-                cache.disposables.dispose('pollObservations')
-            }
-        },
-
-        loadLenses: async () => {
-            const teamId = teamLogic.values.currentTeamId
-            if (!teamId) {
-                return
-            }
-            try {
-                const response = await visionLensesList(String(teamId))
-                actions.loadLensesSuccess(response.results ?? [])
-            } catch {
-                actions.loadLensesFailure()
-            }
+            // Poll while work is in flight, and through the grace window after an observe.
+            scheduleObservationPoll(
+                cache,
+                values.hasObservationsInFlight || Date.now() < values.pollUntil,
+                actions.loadObservations
+            )
         },
 
         observe: async ({ lensId }) => {
