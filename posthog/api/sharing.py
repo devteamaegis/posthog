@@ -645,9 +645,7 @@ def _build_test_interview_share(access_token: str) -> Optional[SharingConfigurat
     # forward-relation cache. We never call `.save()` on either side — these objects
     # exist only so the rendering branch downstream can dereference
     # `sharing_config.interviewee_context.topic` without a DB lookup.
-    SharingConfiguration._meta.get_field("interviewee_context").set_cached_value(
-        sharing_config, interviewee_context
-    )
+    SharingConfiguration._meta.get_field("interviewee_context").set_cached_value(sharing_config, interviewee_context)
     return sharing_config
 
 

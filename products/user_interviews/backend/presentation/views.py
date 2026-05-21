@@ -600,8 +600,6 @@ class TestInterviewLinkSerializer(serializers.Serializer):
     )
 
 
-
-
 def _materialize_links_for_topic(*, topic: UserInterviewTopic, team: Any, created_by: Any) -> list[dict[str, Any]]:
     """Get-or-create an `IntervieweeContext` and enabled `SharingConfiguration` for every
     targeted identifier on the topic. Returns one row per identifier with the resolved
