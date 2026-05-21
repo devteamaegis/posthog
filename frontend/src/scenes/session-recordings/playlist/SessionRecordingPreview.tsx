@@ -327,6 +327,11 @@ export const SessionRecordingPreview = memo(
 
         const { filters } = useValues(sessionRecordingsPlaylistLogic)
         const { recordingPropertiesById, recordingPropertiesLoading } = useValues(sessionRecordingsListPropertiesLogic)
+        const { featureFlags } = useValues(featureFlagLogic)
+
+        // Vision teams trigger analysis from the replay-page dock, not the list. Hide the legacy
+        // summarize icon when replay-vision is on so it doesn't surface alongside Vision.
+        const replayVisionEnabled = !!featureFlags[FEATURE_FLAGS.REPLAY_VISION]
 
         const recordingProperties = recordingPropertiesById[recording.id]
         const loading = !recordingProperties && recordingPropertiesLoading
@@ -416,7 +421,7 @@ export const SessionRecordingPreview = memo(
 
                         <div className="flex items-center justify-between">
                             <FirstURL startUrl={recording.start_url} />
-                            <RecordingSummaryIcon recording={recording} />
+                            {!replayVisionEnabled && <RecordingSummaryIcon recording={recording} />}
                         </div>
                     </div>
 
