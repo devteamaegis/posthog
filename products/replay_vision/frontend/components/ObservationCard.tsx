@@ -123,10 +123,24 @@ function ObservationResult({
     }
 
     const summary = typeof result.summary === 'string' ? result.summary : null
+    const userType = typeof result.user_type === 'string' ? result.user_type : null
+    const outcome = typeof result.outcome === 'string' ? result.outcome : null
     const keywords = Array.isArray(result.keywords) ? (result.keywords as string[]) : []
     return (
         <div className="flex flex-col gap-1">
             {summary && <span className={bodyClass}>{summary}</span>}
+            {userType && (
+                <span className={reasoningClass}>
+                    <span className="font-medium">User: </span>
+                    {userType}
+                </span>
+            )}
+            {outcome && (
+                <span className={reasoningClass}>
+                    <span className="font-medium">Outcome: </span>
+                    {outcome}
+                </span>
+            )}
             {keywords.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                     {keywords.map((keyword) => (
