@@ -6,7 +6,6 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
-from django.db import IntegrityError
 from django.utils import timezone
 
 from posthog.models.team.team import Team
@@ -141,30 +140,6 @@ async def arun_signals_scout(
             skip_reason="prior run still in progress",
         )
 
-=======
-    try:
-        run = await database_sync_to_async(_create_run_row, thread_sensitive=False)(
-            team=team, config=config, skill=skill, limits=limits
-        )
-    except IntegrityError:
-        # Lost the TOCTOU race: another child for the same (team, skill) inserted its
-        # RUNNING row between our `_has_running_run` check and this INSERT. Translate
-        # to a clean skip so the dispatcher records this as a skipped run rather than
-        # a workflow failure.
-        logger.info(
-            "signals_scout: skipping trigger, lost insert race to concurrent dispatch",
-            extra={"team_id": team_id, "skill_name": skill.name},
-        )
-        return RunResult(
-            run_id=None,
-            status=None,
-            last_message=None,
-            runtime_s=0.0,
-            skill_name=skill.name,
-            skill_version=skill.version,
-            skip_reason="concurrent run for this team+skill already RUNNING",
-        )
->>>>>>> d0193ab98c4 (refactor(signals): apply scout/scratchpad rename to PR 6 surface)
     started = time.monotonic()
     # Pre-mint the bridge row's UUID so the prompt can reference it before the row
     # exists. The TaskRun is created inside `MultiTurnSession.start`; the bridge row
@@ -184,7 +159,6 @@ async def arun_signals_scout(
         )
         runtime_s = time.monotonic() - started
         return RunResult(
-<<<<<<< HEAD
             run_id=str(run_id),
             task_run_id=task_run_id,
             status=TaskRun.Status.COMPLETED.value,
@@ -228,32 +202,12 @@ async def arun_signals_scout(
                 "runtime_s": runtime_s,
             },
         )
-=======
-        try:
-            await database_sync_to_async(_finalize_failed, thread_sensitive=False)(
-                run_id=run.id,
-                exc=exc,
-                runtime_s=runtime_s,
-                limits=limits,
-                skill=skill,
-            )
-        except Exception:
-            # If we can't even write the failure row (e.g. worker truly going away),
-            # let the next coordinator tick's self-heal path catch it. Don't swallow
-            # the original cancellation.
-            logger.exception(
-                "signals_scout: failed to mark row failed during cancellation; "
-                "self-heal will reconcile on next coordinator tick",
-                extra={"team_id": team_id, "run_id": str(run.id)},
-            )
->>>>>>> d0193ab98c4 (refactor(signals): apply scout/scratchpad rename to PR 6 surface)
         raise
 
 
 async def _spawn_and_run(
     *,
     team: Team,
-<<<<<<< HEAD
     config: SignalScoutConfig,
     run_id: Any,
     started_at: Any,
