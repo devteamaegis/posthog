@@ -1,1 +1,1 @@
-0053_externaldatajob_cdc_write_mode
+0052_externaldataschema_enabled_columns
