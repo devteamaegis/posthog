@@ -61,20 +61,29 @@ export function AccountsTabFilters(): JSX.Element {
                 checked={allRolesUnassigned}
                 onChange={setAllRolesUnassigned}
                 label="Unassigned only"
+                disabledReason={accountsLoading ? 'Loading…' : undefined}
                 data-attr="accounts-unassigned-filter"
             />
 
-            <RolePicker label="CSM" value={csmFilter} onChange={setCsmFilter} dataAttr="accounts-csm-filter" />
+            <RolePicker
+                label="CSM"
+                value={csmFilter}
+                onChange={setCsmFilter}
+                disabled={accountsLoading}
+                dataAttr="accounts-csm-filter"
+            />
             <RolePicker
                 label="AE"
                 value={accountExecutiveFilter}
                 onChange={setAccountExecutiveFilter}
+                disabled={accountsLoading}
                 dataAttr="accounts-ae-filter"
             />
             <RolePicker
                 label="Owner"
                 value={accountOwnerFilter}
                 onChange={setAccountOwnerFilter}
+                disabled={accountsLoading}
                 dataAttr="accounts-owner-filter"
             />
 
@@ -99,11 +108,13 @@ function RolePicker({
     label,
     value,
     onChange,
+    disabled,
     dataAttr,
 }: {
     label: string
     value: RoleFilterValue
     onChange: (value: RoleFilterValue) => void
+    disabled?: boolean
     dataAttr: string
 }): JSX.Element {
     return (
@@ -121,6 +132,7 @@ function RolePicker({
                 onChange={(checked) => onChange(checked ? 'unassigned' : null)}
                 label="Unassigned"
                 size="small"
+                disabledReason={disabled ? 'Loading…' : undefined}
             />
         </div>
     )
