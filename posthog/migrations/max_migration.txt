@@ -1,1 +1,1 @@
-1169_organization_ai_training_fields
+1170_drop_alertconfiguration_is_calculating_column
