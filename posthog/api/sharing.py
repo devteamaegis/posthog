@@ -618,19 +618,23 @@ def _build_test_interview_share(access_token: str) -> Optional[SharingConfigurat
     interview-rendering branch (which expects ``SharingConfiguration.interviewee_context.topic``)
     handle this case unchanged. The objects must never be saved.
     """
-    from products.user_interviews.backend.models import IntervieweeContext, UserInterviewTopic
-    from products.user_interviews.backend.presentation.views import (
+    from products.user_interviews.backend.logic import (
         TEST_INTERVIEW_TOKEN_PREFIX,
         TEST_INTERVIEWEE_DISPLAY_NAME,
     )
+    from products.user_interviews.backend.models import IntervieweeContext, UserInterviewTopic
 
     if not access_token.startswith(TEST_INTERVIEW_TOKEN_PREFIX):
         return None
     topic_uuid = access_token[len(TEST_INTERVIEW_TOKEN_PREFIX) :]
+    # Looking up by `id` alone (without a `team_id=...` clause) is intentional and
+    # parallels how `SharingConfiguration` is fetched by `access_token` a few lines below:
+    # the topic UUID is itself the unguessable public token for the synthetic test
+    # interviewee, so requiring a separate team filter would not add a security boundary.
     try:
-        topic = UserInterviewTopic.objects.select_related("team", "team__organization", "created_by").get(
-            id=topic_uuid
-        )
+        topic = UserInterviewTopic.objects.select_related(  # nosemgrep: semgrep.rules.idor-lookup-without-team
+            "team", "team__organization", "created_by"
+        ).get(id=topic_uuid)
     except (ValueError, UserInterviewTopic.DoesNotExist):
         return None
     interviewee_context = IntervieweeContext(

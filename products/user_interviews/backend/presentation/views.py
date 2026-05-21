@@ -41,6 +41,7 @@ from posthog.utils import absolute_uri
 
 from ..facade.api import parse_interviewee_identifier
 from ..facade.enums import SEARCH_DOCUMENT_TYPES
+from ..logic import build_test_link_payload
 from ..models import EmailWithDisplayNameValidator, IntervieweeContext, UserInterview, UserInterviewTopic
 
 logger = structlog.get_logger(__name__)
@@ -564,23 +565,6 @@ class InterviewLinkSerializer(serializers.Serializer):
     )
 
 
-# The synthetic test interviewee is a known, single, fixed identity — it has no
-# per-person config, no email, no distinct ID. The display name is used only for the
-# greeting in the voice agent's first message.
-TEST_INTERVIEWEE_DISPLAY_NAME = "Test interviewee"
-
-# Prefix on the public URL token that signals "this is the synthetic test interviewee on
-# topic <uuid>" rather than "this is a SharingConfiguration access_token". The URL is
-# fully derivable from the topic UUID — no SharingConfiguration row is created or stored.
-TEST_INTERVIEW_TOKEN_PREFIX = "test-"
-
-
-def build_test_interview_token(topic_id: Any) -> str:
-    """Deterministic public-URL token for a topic's synthetic test interviewee.
-    `topic_id` is an unguessable UUID, so the resulting URL is as private as the topic itself."""
-    return f"{TEST_INTERVIEW_TOKEN_PREFIX}{topic_id}"
-
-
 class TestInterviewSnapshotSerializer(serializers.Serializer):
     completed_at = serializers.DateTimeField(
         help_text="When the most recent test call completed (i.e., when Vapi delivered the end-of-call report)."
@@ -616,20 +600,6 @@ class TestInterviewLinkSerializer(serializers.Serializer):
     )
 
 
-def _build_test_link_payload(*, topic: UserInterviewTopic) -> dict[str, Any]:
-    snapshot: dict[str, Any] | None = None
-    if topic.test_call_completed_at is not None:
-        snapshot = {
-            "completed_at": topic.test_call_completed_at,
-            "transcript": topic.test_transcript or "",
-            "summary": topic.test_summary or "",
-            "recording_url": topic.test_recording_url or "",
-        }
-    return {
-        "interview_url": absolute_uri(f"/interview/{build_test_interview_token(topic.id)}"),
-        "agent_context": topic.agent_context or "",
-        "latest_test_interview": snapshot,
-    }
 
 
 def _materialize_links_for_topic(*, topic: UserInterviewTopic, team: Any, created_by: Any) -> list[dict[str, Any]]:
@@ -923,20 +893,20 @@ class UserInterviewTopicViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         request=None,
         responses={200: OpenApiResponse(response=TestInterviewLinkSerializer)},
         description=(
-            "Generate (or fetch) the public test interview link for a topic. Materializes a "
-            "synthetic test IntervieweeContext (one per topic) with a stable SharingConfiguration "
-            "so the URL is the same across calls. Returns the URL, the agent context the voice "
-            "agent will see, and the most recent stored test interview (transcript + summary), if "
-            "one exists. Completed test calls replace the previously stored test interview rather "
-            "than accumulating, and test interviews do not appear in the regular interview list "
-            "or count toward the topic's response rate — so this is the right tool for dogfooding "
-            "the interview flow without burning a real participant slot."
+            "Return the public test interview link for a topic. The URL is derived directly "
+            "from the topic UUID (no `SharingConfiguration` row is created), so it is stable "
+            "across calls. Response includes the topic's `agent_context` and the most recent "
+            "stored test interview's transcript / summary / recording URL, if a test call has "
+            "completed. Each completed test call overwrites the previous transcript on the "
+            "topic — only the latest is retained, and test calls never appear in the regular "
+            "interview list or count toward the topic's response rate. Use this to dogfood the "
+            "interview flow without burning a real participant slot."
         ),
     )
     @action(detail=True, methods=["post"], url_path="generate_test_link")
     def generate_test_link(self, request: Request, *args: Any, **kwargs: Any) -> response.Response:
         topic = self.get_object()
-        payload = _build_test_link_payload(topic=topic)
+        payload = build_test_link_payload(topic=topic)
         return response.Response(TestInterviewLinkSerializer(payload).data)
 
     @extend_schema(

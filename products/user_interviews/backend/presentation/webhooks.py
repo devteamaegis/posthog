@@ -203,16 +203,21 @@ def _build_first_message(
 def _resolve_test_topic(access_token: str) -> UserInterviewTopic | None:
     """Resolve a `test-<uuid>` access token to its topic. Returns None for any other
     token shape (or for unparseable / missing topics). No DB row exists for the
-    synthetic test interviewee — the URL is fully derivable from the topic UUID."""
-    from .views import TEST_INTERVIEW_TOKEN_PREFIX
+    synthetic test interviewee — the URL is fully derivable from the topic UUID.
+
+    Looking up by `id` alone (without a `team_id=...` clause) is intentional and
+    parallels how SharingConfiguration is looked up by `access_token` in
+    `posthog/api/sharing.py`: the topic UUID is itself the unguessable public token,
+    so requiring a separate team filter would not add a security boundary."""
+    from ..logic import TEST_INTERVIEW_TOKEN_PREFIX
 
     if not access_token.startswith(TEST_INTERVIEW_TOKEN_PREFIX):
         return None
     topic_uuid = access_token[len(TEST_INTERVIEW_TOKEN_PREFIX) :]
     try:
-        return UserInterviewTopic.objects.select_related("team", "team__organization", "created_by").get(
-            id=topic_uuid
-        )
+        return UserInterviewTopic.objects.select_related(  # nosemgrep: semgrep.rules.idor-lookup-without-team
+            "team", "team__organization", "created_by"
+        ).get(id=topic_uuid)
     except (ValueError, UserInterviewTopic.DoesNotExist):
         return None
 
@@ -282,7 +287,8 @@ def start_call(request: Request, access_token: str) -> Response:
     they also use it to actually start the call. The win is removing the leak from the
     initial HTML and giving us a single, auditable, rate-limitable surface.
     """
-    from .views import TEST_INTERVIEWEE_DISPLAY_NAME, _merge_agent_context, _parse_identifier
+    from ..logic import TEST_INTERVIEWEE_DISPLAY_NAME
+    from .views import _merge_agent_context, _parse_identifier
 
     if not settings.VAPI_PUBLIC_KEY or not settings.VAPI_ASSISTANT_ID:
         logger.warning("user_interviews_start_call_misconfigured")

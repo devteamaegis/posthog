@@ -13,8 +13,8 @@ from posthog.scopes import APIScopeObject
 
 from ee.hogai.tool import MaxTool
 
+from .logic import build_test_link_payload
 from .models import EmailWithDisplayNameValidator, UserInterview, UserInterviewTopic
-from .presentation.views import _build_test_link_payload
 
 
 def _topic_url(topic_id: str) -> str:
@@ -139,7 +139,7 @@ class GenerateTestInterviewLinkTool(MaxTool):
                 "error": "topic_not_found",
             }
 
-        payload = _build_test_link_payload(topic=topic)
+        payload = build_test_link_payload(topic=topic)
         snapshot = payload["latest_test_interview"]
 
         message_lines = [

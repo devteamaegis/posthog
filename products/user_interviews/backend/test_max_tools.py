@@ -1,11 +1,12 @@
 import pytest
+from freezegun import freeze_time
 from posthog.test.base import BaseTest
+
+from django.utils import timezone
 
 from asgiref.sync import sync_to_async
 from langchain_core.runnables import RunnableConfig
 from parameterized import parameterized
-
-from django.utils import timezone
 
 from posthog.models.sharing_configuration import SharingConfiguration
 
@@ -174,6 +175,7 @@ class TestGenerateTestInterviewLinkTool(BaseTest):
         assert "Test interview link" in content
 
     @pytest.mark.django_db
+    @freeze_time("2026-05-21 12:00:00")
     def test_run_impl_surfaces_latest_test_call_from_topic_fields(self):
         topic = UserInterviewTopic.objects.create(
             team=self.team,

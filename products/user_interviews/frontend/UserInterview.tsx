@@ -287,9 +287,7 @@ function TestInterviewWidget({
                         </LemonButton>
                     </div>
                 ) : (
-                    <p className="text-danger text-sm mb-0">
-                        Couldn't load the test link. Try refreshing the page.
-                    </p>
+                    <p className="text-danger text-sm mb-0">Couldn't load the test link. Try refreshing the page.</p>
                 )}
                 <div>
                     <div className="text-xs font-semibold uppercase text-muted tracking-wide mb-1">

@@ -1059,6 +1059,7 @@ class TestGenerateTestInterviewLink(_FeatureFlagEnabledMixin):
         second = self.client.post(self._url(str(topic.id))).json()
         self.assertEqual(first["interview_url"], second["interview_url"])
 
+    @freeze_time("2026-05-21 12:00:00")
     def test_returns_latest_test_call_state_from_topic_fields(self):
         topic = self._create_topic()
         recorded_at = timezone.now()
