@@ -666,41 +666,6 @@ def post_posthog_code_no_repos_activity(
     )
 
 
-def _post_user_github_warning_if_missing(
-    slack: Any,
-    channel: str,
-    thread_ts: str,
-    user_id: int,
-    team_id: int,
-) -> None:
-    """Post a heads-up when the mentioning user has no personal GitHub integration.
-
-    The task still runs on the team-level GitHub App, but PRs will be attributed to the
-    PostHog app rather than to the user. Connecting the personal integration restores
-    proper authorship — surface that path in-thread instead of silently degrading.
-    """
-    from django.conf import settings
-
-    from posthog.models.user_integration import UserIntegration
-
-    if UserIntegration.objects.filter(
-        user_id=user_id,
-        kind=UserIntegration.IntegrationKind.GITHUB,
-    ).exists():
-        return
-
-    settings_url = f"{settings.SITE_URL}/project/{team_id}/settings/user-personal-integrations"
-    slack.client.chat_postMessage(
-        channel=channel,
-        thread_ts=thread_ts,
-        text=(
-            "Heads up — you haven't connected your personal GitHub yet, so I'll open this PR as the "
-            "PostHog app instead of as you. Connect it from your project settings to get proper "
-            f"attribution: {settings_url}"
-        ),
-    )
-
-
 @activity.defn
 def post_posthog_code_repo_picker_activity(
     inputs: PostHogCodeSlackMentionWorkflowInputs,
@@ -769,10 +734,6 @@ def create_posthog_code_task_for_repo_activity(
     user_message_ts = event.get("ts")
     if user_message_ts:
         _safe_react(slack.client, channel, user_message_ts, "seedling")
-
-    # Personal-GitHub attribution only matters when a PR is actually opened against a repo.
-    if repository:
-        _post_user_github_warning_if_missing(slack, channel, thread_ts, user_id, integration.team_id)
 
     user_text = re.sub(r"<@[A-Z0-9]+>", "", event.get("text", "")).strip()
     title = user_text[:255] if user_text else "Task from Slack"

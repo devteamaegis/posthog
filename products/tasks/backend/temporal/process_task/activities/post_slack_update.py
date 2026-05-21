@@ -43,6 +43,7 @@ def post_slack_update(input: PostSlackUpdateInput) -> None:
                     return
 
                 handler.post_pr_opened_sandbox_cleaned(pr_url, task_url)
+                _post_user_github_warning_if_missing(task_run, handler)
                 _mark_pr_opened_notified(task_run, pr_url)
             elif task_run.status == TaskRun.Status.CANCELLED:
                 handler.update_reaction("hedgehog")
@@ -98,8 +99,37 @@ def _post_pr_opened_notification_once(task_run, handler, pr_url: str, task_url: 
         return
 
     handler.post_pr_opened(pr_url, task_url)
+    _post_user_github_warning_if_missing(task_run, handler)
 
     _mark_pr_opened_notified(task_run, pr_url)
+
+
+def _post_user_github_warning_if_missing(task_run, handler) -> None:
+    """Tell the task author in-thread when their personal GitHub isn't connected.
+
+    Called alongside the first PR-opened notification, so it fires once per PR via the
+    existing `_is_pr_opened_notified` guard. The PR has already been opened under the
+    PostHog app identity at this point — the warning explains why, and how to fix it
+    for next time.
+    """
+    task = task_run.task
+    if task.created_by_id is None:
+        return
+
+    from posthog.models.user_integration import UserIntegration
+
+    if UserIntegration.objects.filter(
+        user_id=task.created_by_id,
+        kind=UserIntegration.IntegrationKind.GITHUB,
+    ).exists():
+        return
+
+    settings_url = f"{settings.SITE_URL}/project/{task.team_id}/settings/user-personal-integrations"
+    handler.post_thread_message(
+        "Heads up — you haven't connected your personal GitHub yet, so this PR was opened by "
+        "the PostHog app instead of as you. Connect it from your project settings to get "
+        f"proper attribution on future PRs: {settings_url}"
+    )
 
 
 def _is_pr_opened_notified(task_run, pr_url: str) -> bool:
