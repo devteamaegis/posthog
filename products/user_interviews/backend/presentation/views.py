@@ -312,12 +312,7 @@ class UserInterviewSearchResultSerializer(serializers.Serializer):
 @extend_schema(tags=[ProductKey.USER_INTERVIEWS])
 class UserInterviewViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     scope_object = "user_interview"
-    # Exclude synthetic test interviews from the default listing — they exist to dogfood the
-    # interview flow without polluting the real response set. They remain accessible via
-    # `UserInterviewTopicViewSet.generate_test_link` which fetches them by topic explicitly.
-    queryset = (
-        UserInterview.objects.filter(is_test=False).order_by("-created_at").select_related("created_by").all()
-    )
+    queryset = UserInterview.objects.order_by("-created_at").select_related("created_by").all()
     serializer_class = UserInterviewSerializer
     parser_classes = [MultiPartParser, JSONParser]
     posthog_feature_flag = "user-interviews"
@@ -364,7 +359,7 @@ class UserInterviewViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         scoped_document_ids: list[str] | None = None
         if topic_id is not None:
             scoped_ids_qs = (
-                UserInterview.objects.filter(team_id=self.team_id, topic_id=topic_id, is_test=False)
+                UserInterview.objects.filter(team_id=self.team_id, topic_id=topic_id)
                 .order_by("id")
                 .values_list("id", flat=True)[: SEARCH_TOPIC_INTERVIEW_CAP + 1]
             )
@@ -569,17 +564,27 @@ class InterviewLinkSerializer(serializers.Serializer):
     )
 
 
-# Fixed identifier used for the synthetic test interviewee on every topic. Using a single
-# sentinel value (rather than something topic-derived) makes the row trivially findable
-# and keeps the existing `(topic, interviewee_identifier)` unique constraint enforcing
-# "one test row per topic" without a schema change to allow nulls.
-TEST_INTERVIEWEE_IDENTIFIER = "__posthog_test_interviewee__"
+# The synthetic test interviewee is a known, single, fixed identity — it has no
+# per-person config, no email, no distinct ID. The display name is used only for the
+# greeting in the voice agent's first message.
 TEST_INTERVIEWEE_DISPLAY_NAME = "Test interviewee"
+
+# Prefix on the public URL token that signals "this is the synthetic test interviewee on
+# topic <uuid>" rather than "this is a SharingConfiguration access_token". The URL is
+# fully derivable from the topic UUID — no SharingConfiguration row is created or stored.
+TEST_INTERVIEW_TOKEN_PREFIX = "test-"
+
+
+def build_test_interview_token(topic_id: Any) -> str:
+    """Deterministic public-URL token for a topic's synthetic test interviewee.
+    `topic_id` is an unguessable UUID, so the resulting URL is as private as the topic itself."""
+    return f"{TEST_INTERVIEW_TOKEN_PREFIX}{topic_id}"
 
 
 class TestInterviewSnapshotSerializer(serializers.Serializer):
-    id = serializers.UUIDField(help_text="ID of the latest stored test UserInterview.")
-    created_at = serializers.DateTimeField(help_text="When the test interview row was created.")
+    completed_at = serializers.DateTimeField(
+        help_text="When the most recent test call completed (i.e., when Vapi delivered the end-of-call report)."
+    )
     transcript = serializers.CharField(
         allow_blank=True,
         help_text="Full transcript of the most recent test call. Empty if Vapi delivered no transcript.",
@@ -598,7 +603,7 @@ class TestInterviewLinkSerializer(serializers.Serializer):
     interview_url = serializers.URLField(
         help_text=(
             "Public, unauthenticated URL for the synthetic test interviewee on this topic. "
-            "Safe to open repeatedly — each completed call replaces the previously stored test transcript."
+            "Stable across calls — derived from the topic UUID; no SharingConfiguration row is stored."
         ),
     )
     agent_context = serializers.CharField(
@@ -611,59 +616,18 @@ class TestInterviewLinkSerializer(serializers.Serializer):
     )
 
 
-def _materialize_test_link_for_topic(
-    *, topic: UserInterviewTopic, team: Any, created_by: Any
-) -> tuple[IntervieweeContext, SharingConfiguration]:
-    """Get-or-create the synthetic test `IntervieweeContext` and enabled `SharingConfiguration`
-    for a topic. Idempotent: re-calling reuses the existing rows so the test URL is stable."""
-    ic, _ = IntervieweeContext.objects.get_or_create(
-        team=team,
-        topic=topic,
-        interviewee_identifier=TEST_INTERVIEWEE_IDENTIFIER,
-        defaults={"agent_context": "", "is_test": True, "created_by": created_by},
-    )
-    if not ic.is_test:
-        # Defensive: an older row with this identifier somehow exists without is_test set.
-        # Flip the flag so downstream replace-on-ingest logic kicks in.
-        ic.is_test = True
-        ic.save(update_fields=["is_test"])
-
-    sharing_config = (
-        SharingConfiguration.objects.filter(team=team, interviewee_context=ic, enabled=True)
-        .filter(models.Q(expires_at__isnull=True) | models.Q(expires_at__gt=timezone.now()))
-        .order_by("-created_at")
-        .first()
-    )
-    if sharing_config is None:
-        sharing_config = SharingConfiguration.objects.create(
-            team=team,
-            interviewee_context=ic,
-            enabled=True,
-        )
-    return ic, sharing_config
-
-
-def _build_test_link_payload(
-    *, topic: UserInterviewTopic, ic: IntervieweeContext, sharing_config: SharingConfiguration
-) -> dict[str, Any]:
-    latest = (
-        UserInterview.objects.filter(team_id=topic.team_id, topic=topic, is_test=True)
-        .order_by("-created_at")
-        .only("id", "created_at", "transcript", "summary", "recording_url")
-        .first()
-    )
+def _build_test_link_payload(*, topic: UserInterviewTopic) -> dict[str, Any]:
     snapshot: dict[str, Any] | None = None
-    if latest is not None:
+    if topic.test_call_completed_at is not None:
         snapshot = {
-            "id": latest.id,
-            "created_at": latest.created_at,
-            "transcript": latest.transcript or "",
-            "summary": latest.summary or "",
-            "recording_url": latest.recording_url or "",
+            "completed_at": topic.test_call_completed_at,
+            "transcript": topic.test_transcript or "",
+            "summary": topic.test_summary or "",
+            "recording_url": topic.test_recording_url or "",
         }
     return {
-        "interview_url": absolute_uri(f"/interview/{sharing_config.access_token}"),
-        "agent_context": _merge_agent_context(topic.agent_context or "", ic.agent_context or ""),
+        "interview_url": absolute_uri(f"/interview/{build_test_interview_token(topic.id)}"),
+        "agent_context": topic.agent_context or "",
         "latest_test_interview": snapshot,
     }
 
@@ -972,10 +936,7 @@ class UserInterviewTopicViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"], url_path="generate_test_link")
     def generate_test_link(self, request: Request, *args: Any, **kwargs: Any) -> response.Response:
         topic = self.get_object()
-        ic, sharing_config = _materialize_test_link_for_topic(
-            topic=topic, team=self.team, created_by=request.user
-        )
-        payload = _build_test_link_payload(topic=topic, ic=ic, sharing_config=sharing_config)
+        payload = _build_test_link_payload(topic=topic)
         return response.Response(TestInterviewLinkSerializer(payload).data)
 
     @extend_schema(
@@ -1176,12 +1137,9 @@ class IntervieweeContextViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     permission_classes = [PostHogFeatureFlagPermission]
 
     def safely_get_queryset(self, queryset: QuerySet) -> QuerySet:
-        # Hide the synthetic test interviewee context from the regular per-topic list/CRUD —
-        # it's managed exclusively via `UserInterviewTopicViewSet.generate_test_link`.
         return queryset.filter(
             topic_id=self.parents_query_dict["topic_id"],
             team_id=self.parents_query_dict["team_id"],
-            is_test=False,
         )
 
     def get_serializer_context(self) -> dict[str, Any]:

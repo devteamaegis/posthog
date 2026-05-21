@@ -608,6 +608,48 @@ def custom_404_response(request):
     return render(request, "shared_resource_404.html", status=404)
 
 
+def _build_test_interview_share(access_token: str) -> Optional[SharingConfiguration]:
+    """Resolve a synthetic-test-interviewee access token (``test-<topic_uuid>``) to an
+    unsaved ``SharingConfiguration`` that points at the topic via an unsaved
+    ``IntervieweeContext``. Returns ``None`` for any other token shape.
+
+    No DB rows exist for the synthetic test interviewee — the URL is fully derivable
+    from the topic UUID. Constructing the in-memory objects here lets the existing
+    interview-rendering branch (which expects ``SharingConfiguration.interviewee_context.topic``)
+    handle this case unchanged. The objects must never be saved.
+    """
+    from products.user_interviews.backend.models import IntervieweeContext, UserInterviewTopic
+    from products.user_interviews.backend.presentation.views import (
+        TEST_INTERVIEW_TOKEN_PREFIX,
+        TEST_INTERVIEWEE_DISPLAY_NAME,
+    )
+
+    if not access_token.startswith(TEST_INTERVIEW_TOKEN_PREFIX):
+        return None
+    topic_uuid = access_token[len(TEST_INTERVIEW_TOKEN_PREFIX) :]
+    try:
+        topic = UserInterviewTopic.objects.select_related("team", "team__organization", "created_by").get(
+            id=topic_uuid
+        )
+    except (ValueError, UserInterviewTopic.DoesNotExist):
+        return None
+    interviewee_context = IntervieweeContext(
+        team=topic.team,
+        topic=topic,
+        interviewee_identifier=TEST_INTERVIEWEE_DISPLAY_NAME,
+        agent_context="",
+    )
+    sharing_config = SharingConfiguration(team=topic.team, enabled=True, access_token=access_token)
+    # Bypass Django's FK descriptor "not saved" check by writing directly into the
+    # forward-relation cache. We never call `.save()` on either side — these objects
+    # exist only so the rendering branch downstream can dereference
+    # `sharing_config.interviewee_context.topic` without a DB lookup.
+    SharingConfiguration._meta.get_field("interviewee_context").set_cached_value(
+        sharing_config, interviewee_context
+    )
+    return sharing_config
+
+
 def _compute_inline_query_results_for_shared_notebook(notebook: Notebook, team: Team) -> dict[str, Any]:
     """Pre-compute results for every inline (non-saved-insight) ``ph-query`` node in a notebook.
 
@@ -727,6 +769,13 @@ class SharingViewerPageViewSet(mixins.RetrieveModelMixin, viewsets.GenericViewSe
         # Path based access (SharingConfiguration only)
         access_token = self.kwargs.get("access_token", "").split(".")[0]
         if access_token:
+            # Synthetic test interviewee link: derives the topic from the token directly,
+            # no SharingConfiguration row exists. The returned SharingConfiguration object
+            # is unsaved and exists only for the rendering branch downstream.
+            test_share = _build_test_interview_share(access_token)
+            if test_share is not None:
+                return test_share
+
             try:
                 sharing_configuration = (
                     SharingConfiguration.objects.select_related(

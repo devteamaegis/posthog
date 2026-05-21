@@ -5,6 +5,10 @@ from asgiref.sync import sync_to_async
 from langchain_core.runnables import RunnableConfig
 from parameterized import parameterized
 
+from django.utils import timezone
+
+from posthog.models.sharing_configuration import SharingConfiguration
+
 from products.user_interviews.backend.models import IntervieweeContext, UserInterview, UserInterviewTopic
 
 from .max_tools import CreateUserInterviewTopicTool, GenerateTestInterviewLinkTool
@@ -147,7 +151,7 @@ class TestGenerateTestInterviewLinkTool(BaseTest):
         return GenerateTestInterviewLinkTool(team=self.team, user=self.user, config=self._config)
 
     @pytest.mark.django_db
-    def test_run_impl_returns_link_and_creates_test_context(self):
+    def test_run_impl_returns_derived_link_and_writes_nothing(self):
         topic = UserInterviewTopic.objects.create(
             team=self.team,
             created_by=self.user,
@@ -159,38 +163,33 @@ class TestGenerateTestInterviewLinkTool(BaseTest):
 
         content, artifact = self._tool()._run_impl(topic_id=str(topic.id))
 
-        assert "/interview/" in artifact["interview_url"]
+        assert f"/interview/test-{topic.id}" in artifact["interview_url"]
         assert artifact["has_test_interview"] is False
-        # A synthetic test IntervieweeContext is created, but the topic targeting arrays are untouched.
-        assert IntervieweeContext.objects.filter(topic=topic, is_test=True).count() == 1
+        # The tool does no row creation — no IntervieweeContext, no SharingConfiguration, no UserInterview.
+        assert IntervieweeContext.objects.filter(topic=topic).count() == 0
+        assert SharingConfiguration.objects.filter(team=self.team).count() == 0
+        assert UserInterview.objects.filter(team=self.team).count() == 0
         topic.refresh_from_db()
         assert topic.interviewee_emails == ["alex@example.com"]
         assert "Test interview link" in content
 
     @pytest.mark.django_db
-    def test_run_impl_surfaces_existing_test_interview(self):
+    def test_run_impl_surfaces_latest_test_call_from_topic_fields(self):
         topic = UserInterviewTopic.objects.create(
             team=self.team,
             created_by=self.user,
             interviewee_emails=["alex@example.com"],
             topic="Adoption",
             questions=["q"],
-        )
-        # Pre-existing test interview — generate_test_link must surface it.
-        prior = UserInterview.objects.create(
-            team=self.team,
-            topic=topic,
-            interviewee_identifier="__posthog_test_interviewee__",
-            transcript="prior transcript",
-            summary="prior summary",
-            is_test=True,
-            created_by=self.user,
+            test_transcript="prior transcript",
+            test_summary="prior summary",
+            test_recording_url="",
+            test_call_completed_at=timezone.now(),
         )
 
         content, artifact = self._tool()._run_impl(topic_id=str(topic.id))
 
         assert artifact["has_test_interview"] is True
-        assert artifact["latest_test_interview_id"] == str(prior.id)
         assert "prior summary" in content
 
     @pytest.mark.django_db

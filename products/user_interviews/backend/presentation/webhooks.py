@@ -1,12 +1,18 @@
 """Public, unauthenticated endpoints for the user_interviews product.
 
-Two surfaces live here, both keyed on a SharingConfiguration access token:
+Two surfaces live here, keyed on a public access token. Tokens come in two flavours:
+
+* a ``SharingConfiguration.access_token`` for a real targeted interviewee, or
+* a deterministic ``test-<topic_uuid>`` token for the synthetic test interviewee
+  (no SharingConfiguration row exists — it's derived from the topic UUID).
 
 * ``start_call`` — called by the public interview page when the recipient clicks
   Start. Returns the Vapi credentials and the personalized assistant overrides
   (including merged ``agent_context``). Keeps that context off the initial HTML.
-* ``vapi_webhook`` — called by Vapi at end-of-call. Persists a UserInterview row
-  attributed to the topic creator. Signature-verified; idempotent on ``call.id``.
+* ``vapi_webhook`` — called by Vapi at end-of-call. For a real interview, persists
+  a UserInterview row attributed to the topic creator (signature-verified;
+  idempotent on ``call.id``). For a test interview, overwrites the topic's
+  ``test_*`` fields so only the latest test call is retained.
 """
 
 import hmac
@@ -194,61 +200,48 @@ def _build_first_message(
     return rendered[:_FIRST_MESSAGE_MAX_CHARS]
 
 
-@api_view(["POST"])
-@authentication_classes([])
-@permission_classes([AllowAny])
-def start_call(request: Request, access_token: str) -> Response:
-    """Return the Vapi credentials + assistant overrides for a public interview share.
+def _resolve_test_topic(access_token: str) -> UserInterviewTopic | None:
+    """Resolve a `test-<uuid>` access token to its topic. Returns None for any other
+    token shape (or for unparseable / missing topics). No DB row exists for the
+    synthetic test interviewee — the URL is fully derivable from the topic UUID."""
+    from .views import TEST_INTERVIEW_TOKEN_PREFIX
 
-    The personalized ``agent_context`` (which may include internal CRM notes about the
-    interviewee) is intentionally NOT embedded in the public interview page's HTML — it
-    is fetched from here only when the recipient clicks Start. This keeps casual
-    view-source / window.POSTHOG_EXPORTED_DATA inspection from leaking the agent prompt.
-
-    Note: anyone with the share token can still get this payload — by design, since
-    they also use it to actually start the call. The win is removing the leak from the
-    initial HTML and giving us a single, auditable, rate-limitable surface.
-    """
-    from .views import _merge_agent_context, _parse_identifier
-
-    if not settings.VAPI_PUBLIC_KEY or not settings.VAPI_ASSISTANT_ID:
-        logger.warning("user_interviews_start_call_misconfigured")
-        return Response(
-            {"error": "Vapi is not configured on this PostHog instance."},
-            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+    if not access_token.startswith(TEST_INTERVIEW_TOKEN_PREFIX):
+        return None
+    topic_uuid = access_token[len(TEST_INTERVIEW_TOKEN_PREFIX) :]
+    try:
+        return UserInterviewTopic.objects.select_related("team", "team__organization", "created_by").get(
+            id=topic_uuid
         )
+    except (ValueError, UserInterviewTopic.DoesNotExist):
+        return None
 
-    sharing_config = _resolve_share(access_token)
-    if sharing_config is None or sharing_config.interviewee_context is None:
-        logger.warning("user_interviews_start_call_unknown_access_token")
-        return Response({"error": "unknown access_token"}, status=status.HTTP_404_NOT_FOUND)
-    if _public_sharing_disabled_for_org(sharing_config):
-        # Match the public viewer's behavior: return 404 so the kill switch is opaque to
-        # link recipients (doesn't reveal whether the token is real, just disabled).
-        logger.info(
-            "user_interviews_start_call_sharing_disabled",
-            team_id=sharing_config.team_id,
-        )
-        return Response({"error": "unknown access_token"}, status=status.HTTP_404_NOT_FOUND)
 
-    ic = sharing_config.interviewee_context
-    topic = ic.topic
-    user_name, _ = _parse_identifier(ic.interviewee_identifier)
-    agent_context = _merge_agent_context(topic.agent_context or "", ic.agent_context or "")
-    first_message_template = _resolve_first_message_template(sharing_config.team)
+def _organization_disables_public_sharing(team: Team) -> bool:
+    """Mirror of the SharingConfiguration kill switch, but keyed on a team rather than a
+    persisted share — for the synthetic test interviewee, no SharingConfiguration exists."""
+    organization = team.organization
+    return (
+        organization.is_feature_available(AvailableFeature.ORGANIZATION_SECURITY_SETTINGS)
+        and not organization.allow_publicly_shared_resources
+    )
+
+
+def _vapi_start_call_response(
+    *,
+    team: Team,
+    topic: UserInterviewTopic,
+    user_name: str,
+    agent_context: str,
+    metadata: dict[str, Any],
+) -> Response:
+    first_message_template = _resolve_first_message_template(team)
     first_message = _build_first_message(
         first_message_template,
         user_name=user_name,
         topic_text=topic.topic or "",
-        team_id=sharing_config.team_id,
+        team_id=team.id,
     )
-
-    logger.info(
-        "user_interviews_start_call_issued",
-        team_id=sharing_config.team_id,
-        topic_id=str(topic.id),
-    )
-
     return Response(
         {
             "public_key": settings.VAPI_PUBLIC_KEY,
@@ -268,13 +261,95 @@ def start_call(request: Request, access_token: str) -> Response:
                     # (`["q1", "q2"]`) rather than Python's repr (`['q1', 'q2']`).
                     "questions": json.dumps(topic.questions or []),
                 },
-                "metadata": {
-                    "topic_id": str(topic.id),
-                    "interviewee_identifier": ic.interviewee_identifier,
-                    "sharing_access_token": access_token,
-                },
+                "metadata": metadata,
             },
         }
+    )
+
+
+@api_view(["POST"])
+@authentication_classes([])
+@permission_classes([AllowAny])
+def start_call(request: Request, access_token: str) -> Response:
+    """Return the Vapi credentials + assistant overrides for a public interview share.
+
+    The personalized ``agent_context`` (which may include internal CRM notes about the
+    interviewee) is intentionally NOT embedded in the public interview page's HTML — it
+    is fetched from here only when the recipient clicks Start. This keeps casual
+    view-source / window.POSTHOG_EXPORTED_DATA inspection from leaking the agent prompt.
+
+    Note: anyone with the share token can still get this payload — by design, since
+    they also use it to actually start the call. The win is removing the leak from the
+    initial HTML and giving us a single, auditable, rate-limitable surface.
+    """
+    from .views import TEST_INTERVIEWEE_DISPLAY_NAME, _merge_agent_context, _parse_identifier
+
+    if not settings.VAPI_PUBLIC_KEY or not settings.VAPI_ASSISTANT_ID:
+        logger.warning("user_interviews_start_call_misconfigured")
+        return Response(
+            {"error": "Vapi is not configured on this PostHog instance."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    test_topic = _resolve_test_topic(access_token)
+    if test_topic is not None:
+        if _organization_disables_public_sharing(test_topic.team):
+            logger.info("user_interviews_start_call_test_sharing_disabled", team_id=test_topic.team_id)
+            return Response({"error": "unknown access_token"}, status=status.HTTP_404_NOT_FOUND)
+        logger.info(
+            "user_interviews_start_call_issued_test",
+            team_id=test_topic.team_id,
+            topic_id=str(test_topic.id),
+        )
+        return _vapi_start_call_response(
+            team=test_topic.team,
+            topic=test_topic,
+            user_name=TEST_INTERVIEWEE_DISPLAY_NAME,
+            agent_context=test_topic.agent_context or "",
+            metadata={
+                "topic_id": str(test_topic.id),
+                "interviewee_identifier": TEST_INTERVIEWEE_DISPLAY_NAME,
+                "sharing_access_token": access_token,
+                # Authoritative test flag for the webhook — avoids re-parsing the prefix
+                # downstream and stays correct even if the token shape ever changes.
+                "is_test": True,
+            },
+        )
+
+    sharing_config = _resolve_share(access_token)
+    if sharing_config is None or sharing_config.interviewee_context is None:
+        logger.warning("user_interviews_start_call_unknown_access_token")
+        return Response({"error": "unknown access_token"}, status=status.HTTP_404_NOT_FOUND)
+    if _public_sharing_disabled_for_org(sharing_config):
+        # Match the public viewer's behavior: return 404 so the kill switch is opaque to
+        # link recipients (doesn't reveal whether the token is real, just disabled).
+        logger.info(
+            "user_interviews_start_call_sharing_disabled",
+            team_id=sharing_config.team_id,
+        )
+        return Response({"error": "unknown access_token"}, status=status.HTTP_404_NOT_FOUND)
+
+    ic = sharing_config.interviewee_context
+    topic = ic.topic
+    user_name, _ = _parse_identifier(ic.interviewee_identifier)
+    agent_context = _merge_agent_context(topic.agent_context or "", ic.agent_context or "")
+
+    logger.info(
+        "user_interviews_start_call_issued",
+        team_id=sharing_config.team_id,
+        topic_id=str(topic.id),
+    )
+
+    return _vapi_start_call_response(
+        team=sharing_config.team,
+        topic=topic,
+        user_name=user_name,
+        agent_context=agent_context,
+        metadata={
+            "topic_id": str(topic.id),
+            "interviewee_identifier": ic.interviewee_identifier,
+            "sharing_access_token": access_token,
+        },
     )
 
 
@@ -342,6 +417,9 @@ def vapi_webhook(request: Request) -> Response:
         or overrides_metadata.get("access_token")
     )
     call_id = call.get("id")
+    is_test_call = bool(top_metadata.get("is_test") or overrides_metadata.get("is_test")) or (
+        bool(access_token) and access_token.startswith("test-")
+    )
 
     if message_type == "status-update":
         # Lifecycle ping. We only act on `in-progress` (call started) — the `ended` status
@@ -349,13 +427,22 @@ def vapi_webhook(request: Request) -> Response:
         # capture the ended event from that branch where we already have the interview row.
         call_status = message.get("status")
         if call_status == "in-progress" and access_token:
-            sharing_config = _resolve_share(access_token)
-            if sharing_config is not None and sharing_config.interviewee_context is not None:
-                _capture_user_interview_event(
-                    "user_interview_conversation_started",
-                    sharing_config=sharing_config,
-                    call_id=call_id,
-                )
+            if is_test_call:
+                test_topic = _resolve_test_topic(access_token)
+                if test_topic is not None:
+                    _capture_test_interview_event(
+                        "user_interview_conversation_started",
+                        topic=test_topic,
+                        call_id=call_id,
+                    )
+            else:
+                sharing_config = _resolve_share(access_token)
+                if sharing_config is not None and sharing_config.interviewee_context is not None:
+                    _capture_user_interview_event(
+                        "user_interview_conversation_started",
+                        sharing_config=sharing_config,
+                        call_id=call_id,
+                    )
         logger.info(
             "user_interviews_vapi_webhook_status_update",
             call_status=call_status,
@@ -381,6 +468,47 @@ def vapi_webhook(request: Request) -> Response:
         return Response(
             {"error": "missing sharing_access_token in call.metadata"},
             status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    recording_url = (message.get("recording") or {}).get("url", "") or message.get("recordingUrl", "") or ""
+
+    if is_test_call:
+        test_topic = _resolve_test_topic(access_token)
+        if test_topic is None:
+            logger.warning("user_interviews_vapi_webhook_unknown_test_topic", call_id=call_id)
+            return Response({"error": "unknown access_token"}, status=status.HTTP_404_NOT_FOUND)
+        # No idempotency check by call_id — the synthetic test interviewee keeps only the
+        # latest call. A retry with the same call_id ends up with the same payload written
+        # again, which is a no-op in effect.
+        test_topic.test_transcript = message.get("transcript", "") or ""
+        test_topic.test_summary = message.get("summary", "") or ""
+        test_topic.test_recording_url = recording_url
+        test_topic.test_call_completed_at = now()
+        test_topic.save(
+            update_fields=[
+                "test_transcript",
+                "test_summary",
+                "test_recording_url",
+                "test_call_completed_at",
+            ]
+        )
+        _capture_test_interview_event(
+            "user_interview_conversation_ended",
+            topic=test_topic,
+            call_id=call_id,
+            extra_properties={
+                "had_transcript": bool(test_topic.test_transcript),
+                "had_summary": bool(test_topic.test_summary),
+            },
+        )
+        logger.info(
+            "user_interviews_vapi_webhook_stored_test",
+            team_id=test_topic.team_id,
+            topic_id=str(test_topic.id),
+        )
+        return Response(
+            {"status": "stored_test", "topic_id": str(test_topic.id)},
+            status=status.HTTP_200_OK,
         )
 
     sharing_config = _resolve_share(access_token)
@@ -415,15 +543,8 @@ def vapi_webhook(request: Request) -> Response:
             return Response({"status": "duplicate", "interview_id": str(existing.id)}, status=status.HTTP_200_OK)
 
     topic = interviewee_context.topic
-    recording_url = (message.get("recording") or {}).get("url", "") or message.get("recordingUrl", "") or ""
-    is_test_interview = bool(interviewee_context.is_test)
 
     with transaction.atomic():
-        if is_test_interview:
-            # The test interviewee is a synthetic dogfooding slot — only the latest call is
-            # kept. Replace any prior test interviews on this topic so the topic page and
-            # `generate_test_link` always reflect the most recent run.
-            UserInterview.objects.filter(team=sharing_config.team, topic=topic, is_test=True).delete()
         interview = UserInterview.objects.create(
             team=sharing_config.team,
             topic=topic,
@@ -436,13 +557,8 @@ def vapi_webhook(request: Request) -> Response:
             recording_url=recording_url,
             call_metadata=call,
             created_by=topic.created_by,
-            is_test=is_test_interview,
         )
-        if not is_test_interview:
-            # Test interviews are not indexed: their content is a moving target (each new
-            # call replaces the previous), and they should never surface in semantic search
-            # over real interview responses.
-            transaction.on_commit(lambda: _emit_interview_embeddings(interview, topic))
+        transaction.on_commit(lambda: _emit_interview_embeddings(interview, topic))
 
     _capture_user_interview_event(
         "user_interview_conversation_ended",
@@ -507,5 +623,42 @@ def _capture_user_interview_event(
             "user_interviews_event_capture_failed",
             event=event,
             team_id=sharing_config.team_id,
+            call_id=call_id,
+        )
+
+
+def _capture_test_interview_event(
+    event: str,
+    *,
+    topic: UserInterviewTopic,
+    call_id: str | None,
+    extra_properties: dict[str, Any] | None = None,
+) -> None:
+    """Same shape as `_capture_user_interview_event`, but keyed on the topic — the
+    synthetic test interviewee has no `IntervieweeContext` row to take an id from. We
+    use a per-topic distinct_id so PostHog never spawns a person profile for the
+    synthetic interviewee."""
+    properties: dict[str, Any] = {
+        "topic_id": str(topic.id),
+        "team_id": topic.team_id,
+        "call_id": call_id,
+        "is_test": True,
+    }
+    if call_id:
+        properties["$insert_id"] = f"{event}:{call_id}"
+    if extra_properties:
+        properties.update(extra_properties)
+    try:
+        posthoganalytics.capture(
+            distinct_id=f"user_interview_test:{topic.id}",
+            event=event,
+            properties=properties,
+            groups=groups(organization=topic.team.organization, team=topic.team),
+        )
+    except Exception:
+        logger.exception(
+            "user_interviews_test_event_capture_failed",
+            event=event,
+            team_id=topic.team_id,
             call_id=call_id,
         )

@@ -1030,57 +1030,54 @@ class TestGenerateTestInterviewLink(_FeatureFlagEnabledMixin):
     def _url(self, topic_id: str) -> str:
         return f"/api/environments/{self.team.id}/user_interview_topics/{topic_id}/generate_test_link/"
 
-    def test_generates_a_stable_test_link_and_does_not_consume_real_slots(self):
+    def test_generates_a_link_derived_from_topic_id_with_no_db_writes(self):
         topic = self._create_topic()
+        baseline_contexts = IntervieweeContext.objects.filter(topic=topic).count()
+        baseline_shares = SharingConfiguration.objects.filter(team=self.team).count()
+        baseline_interviews = UserInterview.objects.filter(team=self.team).count()
+
         response = self.client.post(self._url(str(topic.id)))
+
         self.assertEqual(response.status_code, status.HTTP_200_OK, response.content)
         body = response.json()
-        self.assertIn("/interview/", body["interview_url"])
+        self.assertIn(f"/interview/test-{topic.id}", body["interview_url"])
         self.assertEqual(body["latest_test_interview"], None)
-        # The test slot does not appear in topic targeting arrays — it's stored only as a
-        # synthetic IntervieweeContext with is_test=True.
+        self.assertEqual(body["agent_context"], "Researching adoption of session replay")
+        # The endpoint is pure-read — no IntervieweeContext, SharingConfiguration, or
+        # UserInterview rows are created for the synthetic test interviewee.
+        self.assertEqual(IntervieweeContext.objects.filter(topic=topic).count(), baseline_contexts)
+        self.assertEqual(SharingConfiguration.objects.filter(team=self.team).count(), baseline_shares)
+        self.assertEqual(UserInterview.objects.filter(team=self.team).count(), baseline_interviews)
+        # And it does not touch the topic's targeting arrays.
         topic.refresh_from_db()
         self.assertEqual(topic.interviewee_emails, ["alex@example.com"])
         self.assertEqual(topic.interviewee_distinct_ids, [])
-        test_ic = IntervieweeContext.objects.get(topic=topic, is_test=True)
-        self.assertNotIn(test_ic.interviewee_identifier, topic.interviewee_emails)
-        self.assertNotIn(test_ic.interviewee_identifier, topic.interviewee_distinct_ids)
 
     def test_is_idempotent(self):
         topic = self._create_topic()
         first = self.client.post(self._url(str(topic.id))).json()
         second = self.client.post(self._url(str(topic.id))).json()
         self.assertEqual(first["interview_url"], second["interview_url"])
-        self.assertEqual(IntervieweeContext.objects.filter(topic=topic, is_test=True).count(), 1)
-        self.assertEqual(
-            SharingConfiguration.objects.filter(team=self.team, interviewee_context__topic=topic).count(), 1
-        )
 
-    def test_returns_latest_test_interview_state_when_one_exists(self):
+    def test_returns_latest_test_call_state_from_topic_fields(self):
         topic = self._create_topic()
-        # Materialize the test context so we can attach a recorded interview to it.
-        self.client.post(self._url(str(topic.id)))
-        latest = UserInterview.objects.create(
-            team=self.team,
-            topic=topic,
-            interviewee_identifier="__posthog_test_interviewee__",
-            transcript="hello",
-            summary="they said hi",
-            recording_url="https://vapi.example/rec.mp3",
-            is_test=True,
-            created_by=self.user,
-        )
+        recorded_at = timezone.now()
+        topic.test_transcript = "hello"
+        topic.test_summary = "they said hi"
+        topic.test_recording_url = "https://vapi.example/rec.mp3"
+        topic.test_call_completed_at = recorded_at
+        topic.save()
+
         body = self.client.post(self._url(str(topic.id))).json()
         self.assertIsNotNone(body["latest_test_interview"])
-        self.assertEqual(body["latest_test_interview"]["id"], str(latest.id))
         self.assertEqual(body["latest_test_interview"]["transcript"], "hello")
         self.assertEqual(body["latest_test_interview"]["summary"], "they said hi")
         self.assertEqual(body["latest_test_interview"]["recording_url"], "https://vapi.example/rec.mp3")
 
 
 class TestVapiWebhookTestInterviewee(APIBaseTest):
-    def _create_test_share(self) -> SharingConfiguration:
-        topic = UserInterviewTopic.objects.create(
+    def _create_topic(self) -> UserInterviewTopic:
+        return UserInterviewTopic.objects.create(
             team=self.team,
             created_by=self.user,
             interviewee_emails=["alex@example.com"],
@@ -1088,23 +1085,15 @@ class TestVapiWebhookTestInterviewee(APIBaseTest):
             agent_context="ctx",
             questions=[],
         )
-        ic = IntervieweeContext.objects.create(
-            team=self.team,
-            topic=topic,
-            interviewee_identifier="__posthog_test_interviewee__",
-            agent_context="",
-            is_test=True,
-            created_by=self.user,
-        )
-        return SharingConfiguration.objects.create(team=self.team, interviewee_context=ic, enabled=True)
 
-    def _end_of_call_payload(self, access_token: str, call_id: str) -> dict:
+    def _end_of_call_payload(self, topic_id: str, call_id: str) -> dict:
+        access_token = f"test-{topic_id}"
         return {
             "message": {
                 "type": "end-of-call-report",
                 "call": {
                     "id": call_id,
-                    "metadata": {"sharing_access_token": access_token},
+                    "metadata": {"sharing_access_token": access_token, "is_test": True},
                     "duration": 60,
                 },
                 "transcript": f"transcript-{call_id}",
@@ -1125,31 +1114,29 @@ class TestVapiWebhookTestInterviewee(APIBaseTest):
 
     @override_settings(VAPI_WEBHOOK_SECRET="topsecret")
     @patch("products.user_interviews.backend.presentation.webhooks.emit_embedding_request")
-    def test_webhook_replaces_previous_test_interview(self, mock_emit):
-        share = self._create_test_share()
+    def test_webhook_overwrites_topic_test_fields_and_creates_no_rows(self, mock_emit):
+        topic = self._create_topic()
         self.client.logout()
-        first = self._signed_post("topsecret", self._end_of_call_payload(share.access_token, "call_one"))
-        self.assertEqual(first.status_code, status.HTTP_201_CREATED, first.content)
-        second = self._signed_post("topsecret", self._end_of_call_payload(share.access_token, "call_two"))
-        self.assertEqual(second.status_code, status.HTTP_201_CREATED, second.content)
+        first = self._signed_post("topsecret", self._end_of_call_payload(str(topic.id), "call_one"))
+        self.assertEqual(first.status_code, status.HTTP_200_OK, first.content)
+        self.assertEqual(first.json()["status"], "stored_test")
+        second = self._signed_post("topsecret", self._end_of_call_payload(str(topic.id), "call_two"))
+        self.assertEqual(second.status_code, status.HTTP_200_OK, second.content)
 
-        assert share.interviewee_context is not None
-        topic = share.interviewee_context.topic
-        test_interviews = UserInterview.objects.filter(team=self.team, topic=topic, is_test=True)
-        # Only the most recent test interview is retained.
-        self.assertEqual(test_interviews.count(), 1)
-        retained = test_interviews.get()
-        self.assertEqual(retained.transcript, "transcript-call_two")
-        # And no test interview ever gets embedded.
+        topic.refresh_from_db()
+        # The latest call wins — the topic fields are overwritten in place.
+        self.assertEqual(topic.test_transcript, "transcript-call_two")
+        self.assertEqual(topic.test_summary, "summary-call_two")
+        self.assertEqual(topic.test_recording_url, "https://vapi.example/rec.mp3")
+        self.assertIsNotNone(topic.test_call_completed_at)
+        # No UserInterview row is ever written for the synthetic test interviewee.
+        self.assertEqual(UserInterview.objects.filter(team=self.team).count(), 0)
+        # And no embeddings are emitted for the test path.
         mock_emit.assert_not_called()
 
     @override_settings(VAPI_WEBHOOK_SECRET="topsecret")
-    def test_test_interviews_are_excluded_from_regular_list(self):
-        share = self._create_test_share()
+    def test_webhook_404s_on_unknown_test_topic(self):
         self.client.logout()
-        self._signed_post("topsecret", self._end_of_call_payload(share.access_token, "call_t"))
-        # Authenticated list endpoint must not surface the test row.
-        self.client.force_login(self.user)
-        list_response = self.client.get(f"/api/environments/{self.team.id}/user_interviews/")
-        self.assertEqual(list_response.status_code, status.HTTP_200_OK)
-        self.assertEqual(list_response.json()["count"], 0)
+        payload = self._end_of_call_payload("00000000-0000-0000-0000-000000000000", "call_x")
+        response = self._signed_post("topsecret", payload)
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)

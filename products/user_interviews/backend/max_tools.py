@@ -14,7 +14,7 @@ from posthog.scopes import APIScopeObject
 from ee.hogai.tool import MaxTool
 
 from .models import EmailWithDisplayNameValidator, UserInterview, UserInterviewTopic
-from .presentation.views import _build_test_link_payload, _materialize_test_link_for_topic
+from .presentation.views import _build_test_link_payload
 
 
 def _topic_url(topic_id: str) -> str:
@@ -96,10 +96,10 @@ GENERATE_TEST_INTERVIEW_LINK_DESCRIPTION = dedent("""
     - The user wants to see the most recent test interview's transcript or summary.
 
     # What this does
-    Returns a stable, public URL for a synthetic test interviewee on the topic. Calling it
-    repeatedly returns the same URL. Each completed test call replaces the previous test
-    transcript — only the latest test interview is kept, and test interviews never appear
-    in the topic's response rate or the regular interview list.
+    Returns a stable, public URL derived from the topic UUID — no extra rows are created
+    in the database. Calling it repeatedly returns the same URL. Each completed test call
+    overwrites the previous test transcript on the topic (only the latest is kept), and
+    test interviews never appear in the topic's response rate or the regular interview list.
 
     # Required
     - `topic_id`: UUID of the UserInterviewTopic to test. Look it up via the user interview
@@ -139,10 +139,7 @@ class GenerateTestInterviewLinkTool(MaxTool):
                 "error": "topic_not_found",
             }
 
-        ic, sharing_config = _materialize_test_link_for_topic(
-            topic=topic, team=self._team, created_by=self._user
-        )
-        payload = _build_test_link_payload(topic=topic, ic=ic, sharing_config=sharing_config)
+        payload = _build_test_link_payload(topic=topic)
         snapshot = payload["latest_test_interview"]
 
         message_lines = [
@@ -155,7 +152,7 @@ class GenerateTestInterviewLinkTool(MaxTool):
         if snapshot is None:
             message_lines.append("\nNo test call has completed yet for this topic.")
         else:
-            message_lines.append(f"\nLatest test interview (recorded {snapshot['created_at']}):")
+            message_lines.append(f"\nLatest test interview (recorded {snapshot['completed_at']}):")
             summary_excerpt = (snapshot["summary"] or "").strip()
             transcript_excerpt = (snapshot["transcript"] or "").strip()
             if summary_excerpt:
@@ -170,7 +167,6 @@ class GenerateTestInterviewLinkTool(MaxTool):
             "topic_id": str(topic.id),
             "interview_url": payload["interview_url"],
             "has_test_interview": snapshot is not None,
-            "latest_test_interview_id": snapshot["id"] if snapshot else None,
         }
 
 

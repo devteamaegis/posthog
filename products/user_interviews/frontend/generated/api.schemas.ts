@@ -135,10 +135,8 @@ export interface PaginatedInterviewLinkListApi {
 }
 
 export interface TestInterviewSnapshotApi {
-    /** ID of the latest stored test UserInterview. */
-    id: string
-    /** When the test interview row was created. */
-    created_at: string
+    /** When the most recent test call completed (i.e., when Vapi delivered the end-of-call report). */
+    completed_at: string
     /** Full transcript of the most recent test call. Empty if Vapi delivered no transcript. */
     transcript: string
     /** AI-generated summary of the most recent test call. Empty if no summary was generated. */
@@ -148,7 +146,7 @@ export interface TestInterviewSnapshotApi {
 }
 
 export interface TestInterviewLinkApi {
-    /** Public, unauthenticated URL for the synthetic test interviewee on this topic. Safe to open repeatedly — each completed call replaces the previously stored test transcript. */
+    /** Public, unauthenticated URL for the synthetic test interviewee on this topic. Stable across calls — derived from the topic UUID; no SharingConfiguration row is stored. */
     interview_url: string
     /** The agent context the voice agent will see during the test call (the topic's agent_context). */
     agent_context: string

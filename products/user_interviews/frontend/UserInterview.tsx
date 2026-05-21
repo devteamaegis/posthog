@@ -297,7 +297,7 @@ function TestInterviewWidget({
                     </div>
                     {latest ? (
                         <div className="text-sm space-y-2">
-                            <div className="text-muted">Recorded {latest.created_at.split('T')[0]}</div>
+                            <div className="text-muted">Recorded {latest.completed_at.split('T')[0]}</div>
                             {latest.summary ? (
                                 <div>
                                     <div className="text-xs font-semibold uppercase text-muted tracking-wide mb-1">
