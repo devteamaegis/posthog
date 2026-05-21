@@ -221,7 +221,7 @@ export const getUserInterviewTopicsGenerateTestLinkCreateUrl = (projectId: strin
 }
 
 /**
- * Generate (or fetch) the public test interview link for a topic. Materializes a synthetic test IntervieweeContext (one per topic) with a stable SharingConfiguration so the URL is the same across calls. Returns the URL, the agent context the voice agent will see, and the most recent stored test interview (transcript + summary), if one exists. Completed test calls replace the previously stored test interview rather than accumulating, and test interviews do not appear in the regular interview list or count toward the topic's response rate — so this is the right tool for dogfooding the interview flow without burning a real participant slot.
+ * Return the public test interview link for a topic. The URL is derived directly from the topic UUID (no `SharingConfiguration` row is created), so it is stable across calls. Response includes the topic's `agent_context` and the most recent stored test interview's transcript / summary / recording URL, if a test call has completed. Each completed test call overwrites the previous transcript on the topic — only the latest is retained, and test calls never appear in the regular interview list or count toward the topic's response rate. Use this to dogfood the interview flow without burning a real participant slot.
  */
 export const userInterviewTopicsGenerateTestLinkCreate = async (
     projectId: string,

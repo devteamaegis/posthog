@@ -150,10 +150,7 @@ export interface TestInterviewLinkApi {
     interview_url: string
     /** The agent context the voice agent will see during the test call (the topic's agent_context). */
     agent_context: string
-    /**
-     * Most recent stored test interview for this topic, or null if no test call has completed yet.
-     * @nullable
-     */
+    /** Most recent stored test interview for this topic, or null if no test call has completed yet. */
     latest_test_interview: TestInterviewSnapshotApi | null
 }
 

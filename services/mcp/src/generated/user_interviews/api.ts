@@ -3,7 +3,7 @@
  * MCP service uses these Zod schemas for generated tool handlers.
  * To regenerate: hogli build:openapi
  *
- * PostHog API - MCP 16 enabled ops
+ * PostHog API - MCP 17 enabled ops
  * OpenAPI spec version: 1.0.0
  */
 import * as zod from 'zod'
@@ -135,6 +135,18 @@ export const UserInterviewTopicsAddIntervieweeCreateBody = /* @__PURE__ */ zod.o
  * Generate one public interview link per targeted interviewee. Materializes an IntervieweeContext row for every identifier on the topic (without overwriting existing per-person context), and an enabled SharingConfiguration with a unique access token. The URL resolves to the public interview viewer with no PostHog auth required.
  */
 export const UserInterviewTopicsGenerateLinksCreateParams = /* @__PURE__ */ zod.object({
+    id: zod.string().describe('A UUID string identifying this user interview topic.'),
+    project_id: zod
+        .string()
+        .describe(
+            "Project ID of the project you're trying to access. To find the ID of the project, make a call to /api/projects/."
+        ),
+})
+
+/**
+ * Return the public test interview link for a topic. The URL is derived directly from the topic UUID (no `SharingConfiguration` row is created), so it is stable across calls. Response includes the topic's `agent_context` and the most recent stored test interview's transcript / summary / recording URL, if a test call has completed. Each completed test call overwrites the previous transcript on the topic — only the latest is retained, and test calls never appear in the regular interview list or count toward the topic's response rate. Use this to dogfood the interview flow without burning a real participant slot.
+ */
+export const UserInterviewTopicsGenerateTestLinkCreateParams = /* @__PURE__ */ zod.object({
     id: zod.string().describe('A UUID string identifying this user interview topic.'),
     project_id: zod
         .string()

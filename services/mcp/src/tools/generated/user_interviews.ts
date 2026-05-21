@@ -7,6 +7,7 @@ import {
     UserInterviewTopicsAddIntervieweeCreateParams,
     UserInterviewTopicsCreateBody,
     UserInterviewTopicsGenerateLinksCreateParams,
+    UserInterviewTopicsGenerateTestLinkCreateParams,
     UserInterviewTopicsIntervieweesBulkCreateBody,
     UserInterviewTopicsIntervieweesBulkCreateParams,
     UserInterviewTopicsIntervieweesCreateBody,
@@ -101,6 +102,26 @@ const userInterviewTopicsGenerateLinks = (): ToolBase<
         const result = await context.api.request<Schemas.PaginatedInterviewLinkList>({
             method: 'POST',
             path: `/api/environments/${encodeURIComponent(String(projectId))}/user_interview_topics/${encodeURIComponent(String(params.id))}/generate_links/`,
+        })
+        return result
+    },
+})
+
+const UserInterviewTopicsGenerateTestLinkSchema = UserInterviewTopicsGenerateTestLinkCreateParams.omit({
+    project_id: true,
+})
+
+const userInterviewTopicsGenerateTestLink = (): ToolBase<
+    typeof UserInterviewTopicsGenerateTestLinkSchema,
+    Schemas.TestInterviewLink
+> => ({
+    name: 'user-interview-topics-generate-test-link',
+    schema: UserInterviewTopicsGenerateTestLinkSchema,
+    handler: async (context: Context, params: z.infer<typeof UserInterviewTopicsGenerateTestLinkSchema>) => {
+        const projectId = await context.stateManager.getProjectId()
+        const result = await context.api.request<Schemas.TestInterviewLink>({
+            method: 'POST',
+            path: `/api/environments/${encodeURIComponent(String(projectId))}/user_interview_topics/${encodeURIComponent(String(params.id))}/generate_test_link/`,
         })
         return result
     },
@@ -433,6 +454,7 @@ export const GENERATED_TOOLS: Record<string, () => ToolBase<ZodObjectAny>> = {
     'user-interview-topics-add-interviewee': userInterviewTopicsAddInterviewee,
     'user-interview-topics-create': userInterviewTopicsCreate,
     'user-interview-topics-generate-links': userInterviewTopicsGenerateLinks,
+    'user-interview-topics-generate-test-link': userInterviewTopicsGenerateTestLink,
     'user-interview-topics-interviewees-bulk-create': userInterviewTopicsIntervieweesBulkCreate,
     'user-interview-topics-interviewees-create': userInterviewTopicsIntervieweesCreate,
     'user-interview-topics-interviewees-destroy': userInterviewTopicsIntervieweesDestroy,
