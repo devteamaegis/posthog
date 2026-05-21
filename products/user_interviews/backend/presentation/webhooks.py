@@ -416,8 +416,14 @@ def vapi_webhook(request: Request) -> Response:
 
     topic = interviewee_context.topic
     recording_url = (message.get("recording") or {}).get("url", "") or message.get("recordingUrl", "") or ""
+    is_test_interview = bool(interviewee_context.is_test)
 
     with transaction.atomic():
+        if is_test_interview:
+            # The test interviewee is a synthetic dogfooding slot — only the latest call is
+            # kept. Replace any prior test interviews on this topic so the topic page and
+            # `generate_test_link` always reflect the most recent run.
+            UserInterview.objects.filter(team=sharing_config.team, topic=topic, is_test=True).delete()
         interview = UserInterview.objects.create(
             team=sharing_config.team,
             topic=topic,
@@ -430,8 +436,13 @@ def vapi_webhook(request: Request) -> Response:
             recording_url=recording_url,
             call_metadata=call,
             created_by=topic.created_by,
+            is_test=is_test_interview,
         )
-        transaction.on_commit(lambda: _emit_interview_embeddings(interview, topic))
+        if not is_test_interview:
+            # Test interviews are not indexed: their content is a moving target (each new
+            # call replaces the previous), and they should never surface in semantic search
+            # over real interview responses.
+            transaction.on_commit(lambda: _emit_interview_embeddings(interview, topic))
 
     _capture_user_interview_event(
         "user_interview_conversation_ended",

@@ -22,6 +22,7 @@ import type {
     PatchedUserInterviewApi,
     PatchedUserInterviewTopicApi,
     SendInvitesRequestApi,
+    TestInterviewLinkApi,
     UserInterviewApi,
     UserInterviewSearchRequestApi,
     UserInterviewSearchResultApi,
@@ -210,6 +211,24 @@ export const userInterviewTopicsGenerateLinksCreate = async (
     options?: RequestInit
 ): Promise<PaginatedInterviewLinkListApi> => {
     return apiMutator<PaginatedInterviewLinkListApi>(getUserInterviewTopicsGenerateLinksCreateUrl(projectId, id), {
+        ...options,
+        method: 'POST',
+    })
+}
+
+export const getUserInterviewTopicsGenerateTestLinkCreateUrl = (projectId: string, id: string) => {
+    return `/api/environments/${projectId}/user_interview_topics/${id}/generate_test_link/`
+}
+
+/**
+ * Generate (or fetch) the public test interview link for a topic. Materializes a synthetic test IntervieweeContext (one per topic) with a stable SharingConfiguration so the URL is the same across calls. Returns the URL, the agent context the voice agent will see, and the most recent stored test interview (transcript + summary), if one exists. Completed test calls replace the previously stored test interview rather than accumulating, and test interviews do not appear in the regular interview list or count toward the topic's response rate — so this is the right tool for dogfooding the interview flow without burning a real participant slot.
+ */
+export const userInterviewTopicsGenerateTestLinkCreate = async (
+    projectId: string,
+    id: string,
+    options?: RequestInit
+): Promise<TestInterviewLinkApi> => {
+    return apiMutator<TestInterviewLinkApi>(getUserInterviewTopicsGenerateTestLinkCreateUrl(projectId, id), {
         ...options,
         method: 'POST',
     })

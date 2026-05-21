@@ -5,9 +5,9 @@ from asgiref.sync import sync_to_async
 from langchain_core.runnables import RunnableConfig
 from parameterized import parameterized
 
-from products.user_interviews.backend.models import UserInterviewTopic
+from products.user_interviews.backend.models import IntervieweeContext, UserInterview, UserInterviewTopic
 
-from .max_tools import CreateUserInterviewTopicTool
+from .max_tools import CreateUserInterviewTopicTool, GenerateTestInterviewLinkTool
 
 
 class TestCreateUserInterviewTopicTool(BaseTest):
@@ -131,3 +131,70 @@ class TestCreateUserInterviewTopicTool(BaseTest):
         assert topic.interviewee_emails == ["alex@example.com"]
         assert topic.interviewee_distinct_ids == ["user_1"]
         assert topic.questions == ["A real question?"]
+
+
+class TestGenerateTestInterviewLinkTool(BaseTest):
+    def setUp(self):
+        super().setUp()
+        self._config: RunnableConfig = {
+            "configurable": {
+                "team": self.team,
+                "user": self.user,
+            },
+        }
+
+    def _tool(self) -> GenerateTestInterviewLinkTool:
+        return GenerateTestInterviewLinkTool(team=self.team, user=self.user, config=self._config)
+
+    @pytest.mark.django_db
+    def test_run_impl_returns_link_and_creates_test_context(self):
+        topic = UserInterviewTopic.objects.create(
+            team=self.team,
+            created_by=self.user,
+            interviewee_emails=["alex@example.com"],
+            topic="Adoption",
+            agent_context="ctx",
+            questions=["q"],
+        )
+
+        content, artifact = self._tool()._run_impl(topic_id=str(topic.id))
+
+        assert "/interview/" in artifact["interview_url"]
+        assert artifact["has_test_interview"] is False
+        # A synthetic test IntervieweeContext is created, but the topic targeting arrays are untouched.
+        assert IntervieweeContext.objects.filter(topic=topic, is_test=True).count() == 1
+        topic.refresh_from_db()
+        assert topic.interviewee_emails == ["alex@example.com"]
+        assert "Test interview link" in content
+
+    @pytest.mark.django_db
+    def test_run_impl_surfaces_existing_test_interview(self):
+        topic = UserInterviewTopic.objects.create(
+            team=self.team,
+            created_by=self.user,
+            interviewee_emails=["alex@example.com"],
+            topic="Adoption",
+            questions=["q"],
+        )
+        # Pre-existing test interview — generate_test_link must surface it.
+        prior = UserInterview.objects.create(
+            team=self.team,
+            topic=topic,
+            interviewee_identifier="__posthog_test_interviewee__",
+            transcript="prior transcript",
+            summary="prior summary",
+            is_test=True,
+            created_by=self.user,
+        )
+
+        content, artifact = self._tool()._run_impl(topic_id=str(topic.id))
+
+        assert artifact["has_test_interview"] is True
+        assert artifact["latest_test_interview_id"] == str(prior.id)
+        assert "prior summary" in content
+
+    @pytest.mark.django_db
+    def test_run_impl_reports_missing_topic(self):
+        content, artifact = self._tool()._run_impl(topic_id="00000000-0000-0000-0000-000000000000")
+        assert artifact == {"error": "topic_not_found"}
+        assert "No interview topic found" in content

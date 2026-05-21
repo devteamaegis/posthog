@@ -8,6 +8,7 @@ import { Breadcrumb } from '~/types'
 
 import {
     userInterviewTopicsGenerateLinksCreate,
+    userInterviewTopicsGenerateTestLinkCreate,
     userInterviewTopicsIntervieweesList,
     userInterviewTopicsRetrieve,
     userInterviewsList,
@@ -15,6 +16,7 @@ import {
 import type {
     IntervieweeContextApi,
     InterviewLinkApi,
+    TestInterviewLinkApi,
     UserInterviewApi,
     UserInterviewTopicApi,
 } from './generated/api.schemas'
@@ -79,6 +81,17 @@ export const userInterviewLogic = kea<userInterviewLogicType>([
                     | InterviewLinkApi[]
                     | { results?: InterviewLinkApi[] }
                 return unwrapPaginatedOrArray(response)
+            },
+        },
+        testLink: {
+            __default: null as TestInterviewLinkApi | null,
+            loadTestLink: async (): Promise<TestInterviewLinkApi | null> => {
+                const projectId = String(teamLogic.values.currentTeamId)
+                try {
+                    return await userInterviewTopicsGenerateTestLinkCreate(projectId, props.id)
+                } catch {
+                    return null
+                }
             },
         },
     })),
@@ -161,5 +174,6 @@ export const userInterviewLogic = kea<userInterviewLogicType>([
         actions.loadInterviewees()
         actions.loadInterviews()
         actions.loadLinks()
+        actions.loadTestLink()
     }),
 ])

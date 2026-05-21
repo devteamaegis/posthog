@@ -18,11 +18,16 @@ from uuid import UUID
 
 from products.user_interviews.backend import logic
 from products.user_interviews.backend.facade.contracts import IntervieweeIdentity
-from products.user_interviews.backend.max_tools import AnalyzeUserInterviewsTool, CreateUserInterviewTopicTool
+from products.user_interviews.backend.max_tools import (
+    AnalyzeUserInterviewsTool,
+    CreateUserInterviewTopicTool,
+    GenerateTestInterviewLinkTool,
+)
 
 __all__ = [
     "AnalyzeUserInterviewsTool",
     "CreateUserInterviewTopicTool",
+    "GenerateTestInterviewLinkTool",
     "IntervieweeIdentity",
     "has_replied",
     "parse_interviewee_identifier",

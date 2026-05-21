@@ -73,6 +73,26 @@ tools:
             alongside the URL the interviewee should open. The URL hosts the call publicly — no PostHog login required.
             Calling this multiple times is safe: existing share links are reused.
         feature_flag: user-interviews
+    user-interview-topics-generate-test-link:
+        operation: user_interview_topics_generate_test_link_create
+        enabled: true
+        scopes:
+            - user_interview:write
+        annotations:
+            readOnly: false
+            destructive: false
+            idempotent: true
+        title: Get a test interview link and the latest test transcript
+        description: >
+            Return the public test interview link for a topic — a synthetic interviewee slot that lets you dogfood the
+            voice interview flow without consuming one of the real targeted users. The link is stable across calls
+            (idempotent), and the response includes the merged `agent_context` plus the most recently stored test
+            interview's transcript, summary, and recording URL when one exists. Completed test calls replace the
+            previously stored test interview rather than accumulating, and test interviews never appear in the regular
+            interview list, semantic search, or the topic's response-rate stats. Use this when you want to verify what
+            the agent will say, hear what the call sounds like, or share a click-and-call link with a teammate before
+            inviting real participants.
+        feature_flag: user-interviews
     user-interview-topics-interviewees-bulk-create:
         operation: user_interview_topics_interviewees_bulk_create
         enabled: true

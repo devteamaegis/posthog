@@ -14,6 +14,7 @@ from posthog.scopes import APIScopeObject
 from ee.hogai.tool import MaxTool
 
 from .models import EmailWithDisplayNameValidator, UserInterview, UserInterviewTopic
+from .presentation.views import _build_test_link_payload, _materialize_test_link_for_topic
 
 
 def _topic_url(topic_id: str) -> str:
@@ -81,6 +82,96 @@ Provide a structured analysis with clear sections and bullet points where approp
         )
 
         return analysis_response.output_text, None
+
+
+GENERATE_TEST_INTERVIEW_LINK_DESCRIPTION = dedent("""
+    Get a test interview link for a user research topic without consuming one of the real
+    targeted interviewees.
+
+    # When to use
+    - The user wants to try the AI voice interview flow themselves before sending real invites.
+    - The user wants to verify what the agent will say or how the call sounds.
+    - The user asks for a "test link", "dogfood link", "preview the interview", or wants to
+      share a link with a teammate to validate the setup.
+    - The user wants to see the most recent test interview's transcript or summary.
+
+    # What this does
+    Returns a stable, public URL for a synthetic test interviewee on the topic. Calling it
+    repeatedly returns the same URL. Each completed test call replaces the previous test
+    transcript — only the latest test interview is kept, and test interviews never appear
+    in the topic's response rate or the regular interview list.
+
+    # Required
+    - `topic_id`: UUID of the UserInterviewTopic to test. Look it up via the user interview
+      topics list if you only have the topic name.
+    """).strip()
+
+
+class GenerateTestInterviewLinkArgs(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    topic_id: str = Field(
+        description=(
+            "UUID of the UserInterviewTopic to generate a test link for. The test "
+            "interviewee is created on the topic if it doesn't already exist."
+        ),
+    )
+
+
+class GenerateTestInterviewLinkTool(MaxTool):
+    name: str = "generate_test_interview_link"
+    description: str = GENERATE_TEST_INTERVIEW_LINK_DESCRIPTION
+    context_prompt_template: str = (
+        "When the user wants to test, preview, or dogfood a user interview without inviting "
+        "real participants, prefer `generate_test_interview_link`. It is safe to call repeatedly "
+        "— the URL is stable and each new completed test call replaces the previously stored "
+        "test transcript."
+    )
+    args_schema: type[BaseModel] = GenerateTestInterviewLinkArgs
+
+    def get_required_resource_access(self) -> list[tuple[APIScopeObject, AccessControlLevel]]:
+        return [("user_interview", "editor")]
+
+    def _run_impl(self, topic_id: str) -> tuple[str, Any]:
+        topic = UserInterviewTopic.objects.filter(team=self._team, id=topic_id).first()
+        if topic is None:
+            return f"No interview topic found with id `{topic_id}` in this project.", {
+                "error": "topic_not_found",
+            }
+
+        ic, sharing_config = _materialize_test_link_for_topic(
+            topic=topic, team=self._team, created_by=self._user
+        )
+        payload = _build_test_link_payload(topic=topic, ic=ic, sharing_config=sharing_config)
+        snapshot = payload["latest_test_interview"]
+
+        message_lines = [
+            f"Test interview link for '{topic.topic}':",
+            payload["interview_url"],
+            "",
+            "Opening this link starts a real voice call against the topic's agent setup. "
+            "When the call ends, the resulting transcript replaces any previous test transcript.",
+        ]
+        if snapshot is None:
+            message_lines.append("\nNo test call has completed yet for this topic.")
+        else:
+            message_lines.append(f"\nLatest test interview (recorded {snapshot['created_at']}):")
+            summary_excerpt = (snapshot["summary"] or "").strip()
+            transcript_excerpt = (snapshot["transcript"] or "").strip()
+            if summary_excerpt:
+                message_lines.append(f"\n**Summary:**\n{summary_excerpt}")
+            if transcript_excerpt:
+                message_lines.append(f"\n**Transcript:**\n{transcript_excerpt}")
+            if not summary_excerpt and not transcript_excerpt:
+                message_lines.append(
+                    "(The most recent test call completed but Vapi delivered no transcript or summary.)"
+                )
+        return "\n".join(message_lines), {
+            "topic_id": str(topic.id),
+            "interview_url": payload["interview_url"],
+            "has_test_interview": snapshot is not None,
+            "latest_test_interview_id": snapshot["id"] if snapshot else None,
+        }
 
 
 CREATE_USER_INTERVIEW_TOPIC_DESCRIPTION = dedent("""

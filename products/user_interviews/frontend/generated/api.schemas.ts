@@ -134,6 +134,31 @@ export interface PaginatedInterviewLinkListApi {
     results: InterviewLinkApi[]
 }
 
+export interface TestInterviewSnapshotApi {
+    /** ID of the latest stored test UserInterview. */
+    id: string
+    /** When the test interview row was created. */
+    created_at: string
+    /** Full transcript of the most recent test call. Empty if Vapi delivered no transcript. */
+    transcript: string
+    /** AI-generated summary of the most recent test call. Empty if no summary was generated. */
+    summary: string
+    /** URL of the recorded audio for the most recent test call, when Vapi provided one. */
+    recording_url: string
+}
+
+export interface TestInterviewLinkApi {
+    /** Public, unauthenticated URL for the synthetic test interviewee on this topic. Safe to open repeatedly — each completed call replaces the previously stored test transcript. */
+    interview_url: string
+    /** The agent context the voice agent will see during the test call (the topic's agent_context). */
+    agent_context: string
+    /**
+     * Most recent stored test interview for this topic, or null if no test call has completed yet.
+     * @nullable
+     */
+    latest_test_interview: TestInterviewSnapshotApi | null
+}
+
 export interface SendInvitesRequestApi {
     /**
      * Override the default email subject line. Defaults to a friendly prompt referencing the topic.

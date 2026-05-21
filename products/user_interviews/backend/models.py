@@ -40,6 +40,10 @@ class UserInterview(UUIDTModel, CreatedMetaFields):
     interviewee_identifier = models.CharField(max_length=400, blank=True, default="")
     recording_url = models.URLField(blank=True, default="", max_length=2048)
     call_metadata = models.JSONField(default=dict, blank=True)
+    # Set when this interview came in via a topic's synthetic test interviewee. Test
+    # interviews are excluded from response listings and stats; the webhook replaces any
+    # prior test interview on the same topic so only the latest one is retained.
+    is_test = models.BooleanField(default=False, db_default=False)
 
 
 class UserInterviewTopic(UUIDTModel, CreatedMetaFields):
@@ -75,6 +79,10 @@ class IntervieweeContext(UUIDTModel, CreatedMetaFields):
     )
     interviewee_identifier = models.CharField(max_length=400)
     agent_context = models.TextField()
+    # Marks the synthetic test interviewee row for a topic — used to dogfood the interview
+    # link flow without burning a real participant slot. Constrained to one per topic via
+    # `unique_test_interviewee_per_topic`.
+    is_test = models.BooleanField(default=False, db_default=False)
 
     class Meta:
         ordering = ["-created_at"]
@@ -82,5 +90,10 @@ class IntervieweeContext(UUIDTModel, CreatedMetaFields):
             models.UniqueConstraint(
                 fields=["topic", "interviewee_identifier"],
                 name="unique_interviewee_per_topic",
+            ),
+            models.UniqueConstraint(
+                fields=["topic"],
+                condition=models.Q(is_test=True),
+                name="unique_test_interviewee_per_topic",
             ),
         ]
