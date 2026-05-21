@@ -618,10 +618,7 @@ def _build_test_interview_share(access_token: str) -> Optional[SharingConfigurat
     interview-rendering branch (which expects ``SharingConfiguration.interviewee_context.topic``)
     handle this case unchanged. The objects must never be saved.
     """
-    from products.user_interviews.backend.logic import (
-        TEST_INTERVIEW_TOKEN_PREFIX,
-        TEST_INTERVIEWEE_DISPLAY_NAME,
-    )
+    from products.user_interviews.backend.logic import TEST_INTERVIEW_TOKEN_PREFIX, TEST_INTERVIEWEE_DISPLAY_NAME
     from products.user_interviews.backend.models import IntervieweeContext, UserInterviewTopic
 
     if not access_token.startswith(TEST_INTERVIEW_TOKEN_PREFIX):
