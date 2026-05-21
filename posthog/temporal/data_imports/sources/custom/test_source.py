@@ -253,8 +253,9 @@ class TestCustomSourceValidateCredentials(SimpleTestCase):
         assert err is not None
 
     @patch("posthog.temporal.data_imports.sources.custom.source.make_tracked_session")
-    def test_probe_session_is_ssrf_guarded(self, mock_session):
-        # The probe must mount the SSRF guard so it can't be steered at an internal host.
+    def test_probe_session_forwards_team_id(self, mock_session):
+        # The probe forwards team_id to make_tracked_session — the hop that mounts
+        # the SSRF guard (the guard itself is covered in test_http_transport).
         mock_session.return_value.request.return_value = MagicMock(status_code=200, text="{}")
 
         source = CustomSource()

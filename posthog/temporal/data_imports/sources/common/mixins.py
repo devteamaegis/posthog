@@ -11,15 +11,30 @@ from products.data_warehouse.backend.models.ssh_tunnel import SSHTunnel
 from products.data_warehouse.backend.models.util import _is_safe_public_ip
 
 
-def _is_host_safe(host: str, team_id: int | None) -> tuple[bool, str | None]:
+def _is_host_safe(
+    host: str,
+    team_id: int | None,
+    *,
+    resolve: bool = True,
+    resolved_ip: str | None = None,
+) -> tuple[bool, str | None]:
     """Validate that a host is not an internal/private IP address.
 
     Only enforced on cloud deployments — self-hosted instances are allowed
     to connect to any host.
 
-    Resolves hostnames via DNS and checks all resolved IPs against
-    _is_safe_public_ip to block private, loopback, link-local, multicast,
-    reserved, and IPv6-mapped internal addresses.
+    Hostname-based exemptions (`.postwh.com`, `localhost`) and the team
+    allowlist are always evaluated against `host`. The IP-safety check then
+    runs in one of three modes:
+
+    - `resolved_ip` given: vet that exact address and skip DNS entirely. The
+      post-connect SSRF check passes the IP the socket genuinely connected
+      to, so a rebinding resolver cannot shift the target after the fact.
+    - `resolve=True` (default), no `resolved_ip`: resolve `host` via DNS and
+      vet every resolved IP — the full check.
+    - `resolve=False`, no `resolved_ip`: skip IP resolution — only the
+      hostname exemptions and a literal-IP check on `host` run. A cheap
+      pre-flight that does no network I/O.
 
     team whitelist: team_id 2 in US, team_id 1 in EU are allowed
     to use internal IPs. A team_id of None has no allowlist entry, so the
@@ -44,17 +59,25 @@ def _is_host_safe(host: str, team_id: int | None) -> tuple[bool, str | None]:
     if normalized in {"localhost"}:
         return False, "Hosts with internal IP addresses are not allowed"
 
+    if resolved_ip is not None:
+        if not _is_safe_public_ip(resolved_ip):
+            return False, "Hosts with internal IP addresses are not allowed"
+        return True, None
+
     try:
         if not _is_safe_public_ip(host):
             return False, "Hosts with internal IP addresses are not allowed"
     except ValueError:
         pass
 
+    if not resolve:
+        return True, None
+
     try:
         addrinfo = socket.getaddrinfo(normalized, None, proto=socket.IPPROTO_TCP)
         for _family, _type, _proto, _canonname, sockaddr in addrinfo:
-            resolved_ip = sockaddr[0]
-            if not _is_safe_public_ip(str(resolved_ip)):
+            resolved = sockaddr[0]
+            if not _is_safe_public_ip(str(resolved)):
                 return False, "Hosts with internal IP addresses are not allowed"
     except socket.gaierror:
         return False, "Host could not be resolved"

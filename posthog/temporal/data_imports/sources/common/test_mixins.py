@@ -62,6 +62,38 @@ class TestIsHostSafe(SimpleTestCase):
         assert not valid
         assert error is not None
 
+    @override_settings(CLOUD_DEPLOYMENT="US")
+    def test_resolve_false_skips_dns_for_hostnames(self):
+        """The cheap pre-flight does no DNS — a hostname passes without resolution."""
+        with patch("socket.getaddrinfo") as getaddrinfo:
+            valid, error = _is_host_safe("example.com", team_id=999, resolve=False)
+        assert valid
+        assert error is None
+        getaddrinfo.assert_not_called()
+
+    @override_settings(CLOUD_DEPLOYMENT="US")
+    def test_resolve_false_still_blocks_literal_internal_ip(self):
+        valid, error = _is_host_safe("10.0.0.1", team_id=999, resolve=False)
+        assert not valid
+        assert error is not None
+
+    @override_settings(CLOUD_DEPLOYMENT="US")
+    def test_resolved_ip_blocks_internal_address(self):
+        valid, error = _is_host_safe("api.example.com", team_id=999, resolved_ip="10.0.0.1")
+        assert not valid
+        assert error is not None
+
+    @override_settings(CLOUD_DEPLOYMENT="US")
+    def test_resolved_ip_allows_public_address(self):
+        valid, _ = _is_host_safe("api.example.com", team_id=999, resolved_ip="8.8.8.8")
+        assert valid
+
+    @override_settings(CLOUD_DEPLOYMENT="US")
+    def test_resolved_ip_honors_postwh_exemption(self):
+        """A .postwh.com host stays allowed even when its peer IP is internal."""
+        valid, _ = _is_host_safe("data.postwh.com", team_id=999, resolved_ip="10.0.0.1")
+        assert valid
+
     @parameterized.expand(
         [
             ("localhost", "localhost"),
