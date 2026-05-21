@@ -17,20 +17,19 @@ import {
     initMcpAnalytics,
     type MCPAnalyticsContext,
 } from '@/lib/posthog/analytics'
-import { evaluateFeatureFlags, isFeatureFlagEnabled } from '@/lib/posthog/flags'
+import { evaluateFeatureFlags, type FlagGroups, isFeatureFlagEnabled } from '@/lib/posthog/flags'
 import { type RequestProperties } from '@/lib/request-properties'
 import { SessionManager } from '@/lib/SessionManager'
 import { StateManager } from '@/lib/StateManager'
 import { formatPrompt, type McpMode } from '@/lib/utils'
 import { registerPrompts } from '@/prompts'
 import { registerResources } from '@/resources'
+import type { ContextMillResource } from '@/resources/manifest-types'
 import { registerUiAppResources } from '@/resources/ui-apps'
 import EXECUTE_SQL_PROMPT from '@/templates/execute-sql-prompt.md'
 import { createExecInnerToolCallResolver, createExecTool, type ExecInnerCallTracker } from '@/tools/exec'
 import { getToolDefinition } from '@/tools/toolDefinitions'
 import { type Context, type Env, type State, type Tool } from '@/tools/types'
-
-import type { ContextMillResource } from '@/resources/manifest-types'
 
 import { RedisCache, type RedisLike } from './cache/RedisCache'
 import { getCustomApiBaseUrl, getEnv } from './constants'
@@ -378,7 +377,8 @@ export class HonoMcpServer {
         const _t0 = performance.now()
         const _lap = (label: string): void => {
             const elapsed = performance.now() - _t0
-            console.log(`[init-profile] ${label.padEnd(40)} +${(elapsed).toFixed(0)}ms`)
+            // oxlint-disable-next-line no-console
+            console.log(`[init-profile] ${label.padEnd(40)} +${elapsed.toFixed(0)}ms`)
         }
 
         const { features, tools, version: clientVersion, organizationId, projectId, readOnly, mode } = this.props
@@ -386,9 +386,9 @@ export class HonoMcpServer {
         await this.resolveClientInfo()
         _lap('resolveClientInfo')
 
-        // Start feature flag resolution in parallel with cache seeding
+        // User-level flags resolve in parallel with cache seeding. Tool flags are
+        // deferred until orgId/projectUuid are known so group-scoped rollouts evaluate correctly.
         const flagPromise = this.resolveVersionFlag()
-        const toolFlagsPromise = this.resolveToolFeatureFlags(clientVersion)
         const singleExecPromise = this.resolveSingleExecFlag()
 
         // Seed cache with header-provided IDs before any fetches
@@ -414,6 +414,12 @@ export class HonoMcpServer {
             await context.stateManager.setDefaultOrganizationAndProject()
         }
         _lap('setDefaultOrgAndProject')
+
+        // Flag-eval groups mirror analytics `$groups` so per-organization and per-project
+        // rollouts evaluate against the same entities — see `buildMCPAnalyticsGroups`.
+        const flagAnalyticsContext = await this.getAnalyticsContextSafe(context)
+        const flagGroups = flagAnalyticsContext ? buildMCPAnalyticsGroups(flagAnalyticsContext) : undefined
+        const toolFlagsPromise = this.resolveToolFeatureFlags(clientVersion, flagGroups)
 
         const [flagVersion, toolFeatureFlags, singleExecFlagOn, _apiKey] = await Promise.all([
             flagPromise,
@@ -689,10 +695,7 @@ export class HonoMcpServer {
         return { useSingleExec, version }
     }
 
-    private async resolveTools(
-        context: Context,
-        options: ToolCatalogFilterOptions
-    ): Promise<Tool<z.ZodObject>[]> {
+    private async resolveTools(context: Context, options: ToolCatalogFilterOptions): Promise<Tool<z.ZodObject>[]> {
         if (this._warmup?.catalog.warmedUp) {
             return this._warmup.catalog.getFilteredTools(options) as Tool<z.ZodObject>[]
         }
@@ -718,7 +721,10 @@ export class HonoMcpServer {
         }
     }
 
-    private async resolveToolFeatureFlags(version?: number): Promise<Record<string, boolean> | undefined> {
+    private async resolveToolFeatureFlags(
+        version?: number,
+        groups?: FlagGroups
+    ): Promise<Record<string, boolean> | undefined> {
         try {
             const { getRequiredFeatureFlags } = await import('@/tools/toolDefinitions')
             const flagKeys = getRequiredFeatureFlags(version)
@@ -726,7 +732,7 @@ export class HonoMcpServer {
                 return undefined
             }
             const distinctId = await this.getDistinctId()
-            return await evaluateFeatureFlags(flagKeys, distinctId)
+            return await evaluateFeatureFlags(flagKeys, distinctId, groups)
         } catch {
             return undefined
         }
