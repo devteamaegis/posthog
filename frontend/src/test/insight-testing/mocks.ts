@@ -7,8 +7,11 @@ import { EventDefinition, PropertyDefinition, RawAnnotationType } from '~/types'
 import {
     actionDefinitions,
     eventDefinitions as defaultEventDefs,
+    type FunnelStepData,
+    funnelTrendsSteps,
     lookupActors,
     lookupCompareSeries,
+    lookupFunnelActors,
     lookupSeries,
     personProperties,
     propertyDefinitions as defaultPropDefs,
@@ -27,12 +30,17 @@ export interface QueryBody {
     [key: string]: unknown
 }
 
+interface FunnelsQueryResponseLike {
+    results: FunnelStepData[]
+}
+
 export interface MockResponse {
     match: (query: QueryBody) => boolean
     response:
         | TrendsQueryResponse
         | ActorsQueryResponse
-        | ((query: QueryBody) => TrendsQueryResponse | ActorsQueryResponse)
+        | FunnelsQueryResponseLike
+        | ((query: QueryBody) => TrendsQueryResponse | ActorsQueryResponse | FunnelsQueryResponseLike)
 }
 
 /** Build an ActorsQueryResponse shaped like the server response, with one row
@@ -99,6 +107,38 @@ function resolveActors(query: QueryBody): Array<{ email: string }> {
     })
 }
 
+/** Funnels in trends-viz mode return a flat `FunnelStep[]` — one entry per series.
+ *  For breakdown queries we emit one entry per canned breakdown value. */
+function buildFunnelsResponse(query: QueryBody): FunnelsQueryResponseLike {
+    const breakdownProp = query.breakdownFilter?.breakdowns?.[0]?.property ?? query.breakdownFilter?.breakdown
+    if (breakdownProp && funnelTrendsSteps.byBreakdown[breakdownProp]) {
+        return { results: funnelTrendsSteps.byBreakdown[breakdownProp] }
+    }
+    return { results: [funnelTrendsSteps.default] }
+}
+
+interface FunnelsActorsQueryShape {
+    kind?: string
+    funnelTrendsEntrancePeriodStart?: string | null
+    funnelStepBreakdown?: string | number | null
+}
+
+// PersonsModalLogic wraps the FunnelsActorsQuery inside an ActorsQuery before firing
+// the API call, so the top-level body.kind is 'ActorsQuery' and the funnel-specific
+// fields live one level deeper at body.source.*.
+function isFunnelsActorsQuery(query: QueryBody): boolean {
+    const source = (query as { source?: FunnelsActorsQueryShape }).source
+    return source?.kind === NodeKind.FunnelsActorsQuery
+}
+
+function resolveFunnelActors(query: QueryBody): Array<{ email: string }> {
+    const source = (query as { source?: FunnelsActorsQueryShape }).source ?? {}
+    // FunnelsActorsQuery sends a 'YYYY-MM-DD HH:mm:ss' timestamp; lookupFunnelActors
+    // keys actors by the calendar date so the test data stays compact.
+    const day = source.funnelTrendsEntrancePeriodStart?.split(' ')[0] ?? null
+    return lookupFunnelActors({ day, breakdown: source.funnelStepBreakdown ?? null })
+}
+
 function resolveSeriesData(query: QueryBody): SeriesData[] {
     const breakdownProp = query.breakdownFilter?.breakdowns?.[0]?.property ?? query.breakdownFilter?.breakdown ?? null
     const isCompare = !!(query as Record<string, unknown>).compareFilter
@@ -153,6 +193,17 @@ export function setupInsightMocks({
         {
             match: (query) => query.kind === NodeKind.TrendsQuery,
             response: (query) => buildTrendsResponse(resolveSeriesData(query)),
+        },
+        {
+            match: (query) => query.kind === NodeKind.FunnelsQuery,
+            response: (query) => buildFunnelsResponse(query),
+        },
+        // PersonsModalLogic always wraps an inner query in an ActorsQuery. Check the
+        // funnel-actors wrapper before the generic ActorsQuery matcher so we route
+        // to lookupFunnelActors instead of lookupActors.
+        {
+            match: (query) => query.kind === NodeKind.ActorsQuery && isFunnelsActorsQuery(query),
+            response: (query) => buildActorsResponse(resolveFunnelActors(query)),
         },
         {
             match: (query) => query.kind === NodeKind.ActorsQuery,
