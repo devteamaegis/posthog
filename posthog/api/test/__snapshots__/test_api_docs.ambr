@@ -2,5 +2,7 @@
 # name: TestAPIDocsSchema.test_api_docs_generation_warnings_snapshot
   list([
     '',
+    "Warning: spec consistency: operationId 'endpoints_openapi.json_retrieve' contains non-identifier characters (must match ^[A-Za-z_][A-Za-z0-9_]*$) at GET /api/projects/{project_id}/endpoints/{name}/openapi.json/. Set `operation_id=` explicitly on `@extend_schema(...)` to override the URL-derived default.",
+    "Warning: spec consistency: operationId 'environments_endpoints_openapi.json_retrieve' contains non-identifier characters (must match ^[A-Za-z_][A-Za-z0-9_]*$) at GET /api/environments/{environment_id}/endpoints/{name}/openapi.json/. Set `operation_id=` explicitly on `@extend_schema(...)` to override the URL-derived default.",
   ])
 # ---
