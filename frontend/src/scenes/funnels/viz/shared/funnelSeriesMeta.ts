@@ -1,5 +1,8 @@
 import type { SeriesDatum } from 'scenes/insights/InsightTooltip/insightTooltipUtils'
 
+// Series label shown in the tooltip when a funnel trends chart is not broken down.
+export const FUNNEL_CONVERSION_SERIES_LABEL = 'Conversion'
+
 export type FunnelSeriesMeta = {
     days?: string[]
     // Narrower than BreakdownKeyType — aligned with SeriesDatum so the tooltip adapter

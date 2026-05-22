@@ -83,7 +83,7 @@ describe('funnelChartTransforms', () => {
                 showTrendLines: false,
             })
 
-            expect(config.yAxis?.format).toBe('percentage')
+            expect(config.yAxis).toMatchObject({ format: 'percentage' })
         })
 
         it('passes through goal lines, trend lines, and value labels', () => {
@@ -97,7 +97,8 @@ describe('funnelChartTransforms', () => {
                 valueLabels: { formatter: (v) => `${v}%` },
             })
 
-            expect(config.trendLines?.length).toBeGreaterThan(0)
+            expect(config.trendLines).not.toBeUndefined()
+            expect(config.trendLines).not.toHaveLength(0)
             expect(config.goalLines).toHaveLength(1)
             expect(config.valueLabels).toBeTruthy()
         })
@@ -128,11 +129,12 @@ describe('funnelChartTransforms', () => {
         })
     })
 
-    // Sanity guard: FunnelStepWithNestedBreakdown is the shape produced by funnelDataLogic.steps.
-    // Make sure IndexedFunnelStep still extends it so the assignment in FunnelLineChart stays valid.
-    it('IndexedFunnelStep is assignable from FunnelStepWithNestedBreakdown', () => {
-        const step: FunnelStepWithNestedBreakdown = makeStep()
-        const indexed: IndexedFunnelStep = { ...step, id: 0, seriesIndex: 0 }
-        expect(indexed.id).toBe(0)
+    describe('type contracts', () => {
+        // Guards that IndexedFunnelStep stays assignable from funnelDataLogic.steps' shape.
+        it('IndexedFunnelStep is assignable from FunnelStepWithNestedBreakdown', () => {
+            const step: FunnelStepWithNestedBreakdown = makeStep()
+            const indexed: IndexedFunnelStep = { ...step, id: 0, seriesIndex: 0 }
+            expect(indexed.id).toBe(0)
+        })
     })
 })

@@ -33,8 +33,11 @@ export function buildFunnelsQuery(overrides?: Partial<FunnelsQuery>): FunnelsQue
             { kind: NodeKind.EventsNode, event: '$pageview', name: '$pageview' },
             { kind: NodeKind.EventsNode, event: 'Napped', name: 'Napped' },
         ],
-        funnelsFilter: { funnelVizType: FunnelVizType.Trends },
         ...overrides,
+        funnelsFilter: {
+            funnelVizType: FunnelVizType.Trends,
+            ...overrides?.funnelsFilter,
+        },
     }
 }
 

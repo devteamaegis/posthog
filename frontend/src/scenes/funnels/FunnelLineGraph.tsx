@@ -20,7 +20,13 @@ import { funnelDataLogic } from './funnelDataLogic'
 import { funnelPersonsModalLogic } from './funnelPersonsModalLogic'
 import { hasBreakdown } from './funnelUtils'
 
-const LineGraphWrapper = ({ inCardView, children }: { inCardView?: boolean; children: JSX.Element }): JSX.Element => {
+export const LineGraphWrapper = ({
+    inCardView,
+    children,
+}: {
+    inCardView?: boolean
+    children: JSX.Element
+}): JSX.Element => {
     if (inCardView) {
         return <>{children}</>
     }

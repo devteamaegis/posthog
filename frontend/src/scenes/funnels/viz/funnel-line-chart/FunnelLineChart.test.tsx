@@ -3,15 +3,10 @@ import '@testing-library/jest-dom'
 import { cleanup, screen, waitFor } from '@testing-library/react'
 
 import { FEATURE_FLAGS } from 'lib/constants'
-import { setupJsdom, setupSyncRaf } from 'lib/hog-charts/testing'
+import { setupJsdom, setupSyncRaf, waitForHogChartTooltip } from 'lib/hog-charts/testing'
+import { FUNNEL_CONVERSION_SERIES_LABEL } from 'scenes/funnels/viz/shared/funnelSeriesMeta'
 
-import {
-    buildFunnelsQuery,
-    chart,
-    getHogChart,
-    personsModal,
-    renderInsight,
-} from '~/test/insight-testing'
+import { buildFunnelsQuery, chart, getHogChart, personsModal, renderInsight } from '~/test/insight-testing'
 
 let cleanupJsdom: () => void
 let cleanupRaf: () => void
@@ -37,8 +32,7 @@ describe('FunnelLineChart', () => {
 
             const tooltip = await chart.hoverTooltip(2)
 
-            // Tooltip rows show the literal series label ("Conversion") and a percentage value.
-            expect(tooltip.element.textContent).toContain('Conversion')
+            expect(tooltip.element.textContent).toContain(FUNNEL_CONVERSION_SERIES_LABEL)
             expect(tooltip.element.textContent).toMatch(/40%/)
         })
 
@@ -63,13 +57,11 @@ describe('FunnelLineChart', () => {
                 featureFlags: HOG_CHARTS_FUNNEL_FLAG,
             })
 
-            // Breakdown produces multiple series — clicking pins the tooltip so we can inspect rows.
             await chart.clickAtIndex(2)
-            const tooltip = chart.getTooltip()
-            expect(tooltip).not.toBeNull()
-            expect(tooltip!.textContent).toContain('Spike')
-            expect(tooltip!.textContent).toContain('Bramble')
-            expect(tooltip!.textContent).not.toContain('Conversion')
+            const tooltip = await waitForHogChartTooltip()
+            expect(tooltip.textContent).toContain('Spike')
+            expect(tooltip.textContent).toContain('Bramble')
+            expect(tooltip.textContent).not.toContain(FUNNEL_CONVERSION_SERIES_LABEL)
         })
     })
 
@@ -80,12 +72,8 @@ describe('FunnelLineChart', () => {
             await chart.clickAtIndex(2)
 
             await waitFor(() => {
-                expect(personsModal.actorNames()).toEqual([
-                    'funnel-wed-a@example.com',
-                    'funnel-wed-b@example.com',
-                ])
+                expect(personsModal.actorNames()).toEqual(['funnel-wed-a@example.com', 'funnel-wed-b@example.com'])
             })
-            // Title carries "converted on <date>" — verify the date part rendered through.
             expect(personsModal.title()).toMatch(/12 Jun/)
         })
 
@@ -109,24 +97,17 @@ describe('FunnelLineChart', () => {
     describe('value labels overlay', () => {
         it('renders percentage value labels when showValuesOnSeries is enabled', async () => {
             renderInsight({
-                query: buildFunnelsQuery({
-                    funnelsFilter: {
-                        // funnelsFilter overrides the default { funnelVizType: Trends } so we must
-                        // restate the viz type alongside the showValuesOnSeries flag.
-                        funnelVizType: buildFunnelsQuery().funnelsFilter!.funnelVizType,
-                        showValuesOnSeries: true,
-                    },
-                }),
+                query: buildFunnelsQuery({ funnelsFilter: { showValuesOnSeries: true } }),
                 featureFlags: HOG_CHARTS_FUNNEL_FLAG,
             })
 
             await screen.findByRole('img', { name: /chart with/i })
             await waitFor(() => {
-                const labels = getHogChart().valueLabels()
-                expect(labels.length).toBeGreaterThan(0)
-                for (const l of labels) {
-                    expect(l.text).toMatch(/%$/)
-                }
+                const texts = getHogChart()
+                    .valueLabels()
+                    .map((l) => l.text)
+                expect(texts.length).toBeGreaterThan(0)
+                expect(texts.every((t) => t.endsWith('%'))).toBe(true)
             })
         })
     })
@@ -135,10 +116,7 @@ describe('FunnelLineChart', () => {
         it('renders configured goal lines on the chart', async () => {
             renderInsight({
                 query: buildFunnelsQuery({
-                    funnelsFilter: {
-                        funnelVizType: buildFunnelsQuery().funnelsFilter!.funnelVizType,
-                        goalLines: [{ label: 'Target', value: 30, displayIfCrossed: true }],
-                    },
+                    funnelsFilter: { goalLines: [{ label: 'Target', value: 30, displayIfCrossed: true }] },
                 }),
                 featureFlags: HOG_CHARTS_FUNNEL_FLAG,
             })
@@ -152,12 +130,7 @@ describe('FunnelLineChart', () => {
     describe('trend lines overlay', () => {
         it('adds a trend-line series when showTrendLines is enabled', async () => {
             renderInsight({
-                query: buildFunnelsQuery({
-                    funnelsFilter: {
-                        funnelVizType: buildFunnelsQuery().funnelsFilter!.funnelVizType,
-                        showTrendLines: true,
-                    },
-                }),
+                query: buildFunnelsQuery({ funnelsFilter: { showTrendLines: true } }),
                 featureFlags: HOG_CHARTS_FUNNEL_FLAG,
             })
 
@@ -167,5 +140,4 @@ describe('FunnelLineChart', () => {
             })
         })
     })
-
 })

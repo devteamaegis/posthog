@@ -19,12 +19,12 @@ import { FunnelLineChart } from './viz/funnel-line-chart/FunnelLineChart'
 export function Funnel(props: ChartParams): JSX.Element {
     const { insightProps } = useValues(insightLogic)
     const { funnelsFilter } = useValues(funnelDataLogic(insightProps))
-    const useHogChartsFunnel = useFeatureFlag('PRODUCT_ANALYTICS_HOG_CHARTS_FUNNEL')
+    const hogChartsFunnelEnabled = useFeatureFlag('PRODUCT_ANALYTICS_HOG_CHARTS_FUNNEL')
     const { funnelVizType, layout } = funnelsFilter || {}
 
     let viz: JSX.Element | null = null
     if (funnelVizType == FunnelVizType.Trends) {
-        viz = useHogChartsFunnel ? <FunnelLineChart {...props} /> : <FunnelLineGraph {...props} />
+        viz = hogChartsFunnelEnabled ? <FunnelLineChart {...props} /> : <FunnelLineGraph {...props} />
     } else if (funnelVizType == FunnelVizType.TimeToConvert) {
         viz = <FunnelHistogram />
     } else if (funnelVizType === FunnelVizType.Flow) {

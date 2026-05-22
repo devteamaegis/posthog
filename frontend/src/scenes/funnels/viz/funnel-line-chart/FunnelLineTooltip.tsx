@@ -8,7 +8,7 @@ import type { BreakdownFilter, DateRange } from '~/queries/schema/schema-general
 import type { IntervalType } from '~/types'
 
 import { hasBreakdown } from '../../funnelUtils'
-import type { FunnelSeriesMeta } from '../shared/funnelSeriesMeta'
+import { FUNNEL_CONVERSION_SERIES_LABEL, type FunnelSeriesMeta } from '../shared/funnelSeriesMeta'
 
 const NOOP = (): void => {}
 
@@ -59,7 +59,7 @@ export function FunnelLineTooltip({
             if (hasBreakdown(datum.breakdown_value)) {
                 return <div className="datum-label-column">{getDatumTitle(datum, breakdownFilter)}</div>
             }
-            return <div className="datum-label-column">Conversion</div>
+            return <div className="datum-label-column">{FUNNEL_CONVERSION_SERIES_LABEL}</div>
         },
         [breakdownFilter]
     )
